@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title><![CDATA[Untitled RSS Feed]]></title><description><![CDATA[Untitled RSS Feed]]></description><link>https://peter-lawrey.github.io</link><generator>RSS for Node</generator><lastBuildDate>Sat, 24 Mar 2018 20:01:13 GMT</lastBuildDate><atom:link href="https://peter-lawrey.github.io/rss/" rel="self" type="application/rss+xml"/><ttl>60</ttl><item><title><![CDATA[Blockchain Design considerations]]></title><description><![CDATA[<div id="preamble">
+<div class="sectionbody">
+<div class="paragraph">
+<p>After I announced the release of Chronicle Accelerate, a high throughput blockchain solution in Java. One of the questions which came up was; What were the design considerations that went into the solution, particularly around throughput vs latency?</p>
+</div>
+<div class="paragraph">
+<p>Many of these design considerations are not specific to Blockchain or Java, but general performance tuning.</p>
+</div>
+<div class="paragraph">
+<p>If you have any questions, please AMA <a href="https://t.me/ChronicleXCL" class="bare">https://t.me/ChronicleXCL</a></p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_why_use_java">Why use Java?</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>If you want maximum performance, why use Java?</p>
+</div>
+<div class="paragraph">
+<p>This has two assumptions; what are you maximising the performance of, and is the Java portion a bottleneck anyway.</p>
+</div>
+<div class="paragraph">
+<p>In most IT solutions, the cost of the hardware is small compared with the cost of IT development, esp if you don&#8217;t use a solution which is designed to be expensive such as Proof of Work.  Use a lower CPU model, and the resource you want to maximise is development of the solution ie people. Most of the cost of development is actually in integration with existing systems. So you want to spend most of your time designing a system which is easy to develop and integrate with.
+Java is one of the most widely used languages, and one of the easiest to master all it&#8217;s lean set of features. By supporting multiple common APIs from the start, you make sure ease of integration is a priority in the design.</p>
+</div>
+<div class="paragraph">
+<p>In terms of the blockchain solution we chose, the key bottleneck CPU wise is the Ed25519 signature and verification.  The core of this algorithm is actually written in assembly to maximise performance. In designing a "maxed out" node to get the highest throughput per sub chain I would estimate the number of CPUs to be</p>
+</div>
+<table class="tableblock frame-all grid-all spread">
+<colgroup>
+<col style="width: 50%;">
+<col style="width: 50%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Code type</th>
+<th class="tableblock halign-left valign-top">CPUs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Assembly (Ed25519)</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">&nbsp;40</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Operating System (Mostly TCP)</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">&nbsp;24</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Java</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">&nbsp;&nbsp;4</p></td>
+</tr>
+</tbody>
+</table>
+<div class="paragraph">
+<p>While all the interesting custom development and business logic will be in Java, most of the CPU will be consumed by code already written and optimised in another language.</p>
+</div>
+<div class="paragraph">
+<p>In short, we want to maximise developer efficiency, and most of the CPU consumed isn&#8217;t written in Java anyway.</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_why_develop_a_blockchain">Why develop a Blockchain?</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Many solutions which are blockchain based, when they optimise the CPU consumed end up taking away some of the reason for having a blockchain in the first place.  If all you end up developing is a distributed ledger or a simple database, I don&#8217;t see the point as these solutions already exist.</p>
+</div>
+<div class="paragraph">
+<p>An essential feature which makes a blockchain different is; not needing to trust individual nodes are not fraudulent. If we optimise the solution but lose this feature in the process, we really have a distributed ledger (sometimes called a "Private Blockchain")  Basically if you have a blockchain which can&#8217;t be run/mined publically I don&#8217;t see the use case, though it might be a good marketting strategy.</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_ways_of_protecting_against_fraud">Ways of protecting against fraud</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Fraud protection should prevent creating unathorized messages. Note: preventing a message from being falsified doesn&#8217;t prevent it from being read.</p>
+</div>
+<div class="paragraph">
+<p>In our case, we use cryptographic signatures to transactions so that only the holder of a private key can create or modify the the transaction.  For this case we use Ed25519 as one of the fastest 256-bit signatures.</p>
+</div>
+<div class="paragraph">
+<p>Use of such a signature and verification, adds significantly to latency.  The backend blockchain add about 2.5 micro-seconds latency however the verification and signing needed adds about 100 micro-seconds.  While we can add CPUs to increase throughput, they won&#8217;t help in reducing latency.</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_optimising_for_throughput">Optimising for throughput</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>While most systems are optimized for throughput, trading systems tend to optimise for latency.  Reduce latency enough and you will also get the throughput you need.  Whether you optimise for throughput or latency depends on the type of problem you have. If many portions of the work can be done at once without having to work together, you can optimise for throughput with concurrent processing, esp as this is usually easier.  If you have have key portions of work which must be performed in order such as transactions, you have to reduce the latency of each transaction to increase throughput.</p>
+</div>
+<div class="paragraph">
+<p>As we have identified, most of the work is CPU bound, and independant. To optimise the system, we need to examine which pieces of work are serial by nature.</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_identifying_serial_bottlenecks">Identifying serial bottlenecks</h2>
+<div class="sectionbody">
+<table class="tableblock frame-all grid-all spread">
+<colgroup>
+<col style="width: 50%;">
+<col style="width: 50%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Concurrent</th>
+<th class="tableblock halign-left valign-top">Serial</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Sign/verify</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Consensus</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Client TCP</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Transaction processing</p></td>
+</tr>
+</tbody>
+</table>
+<div class="sect2">
+<h3 id="_consensus">Consensus</h3>
+<div class="paragraph">
+<p>The cost of consensus increases with the rate at which this happens O(N), and the number of nodes in the cluster O(M ln M). In the later case, M nodes have M times the processing power so the overhead is just O(ln M)</p>
+</div>
+<div class="paragraph">
+<p>However, both of these are in our control. We determine how often consensus is reached. We decide if its 10 ms, 1 second or 1 minute. Obviously we want this to be low, as this largely determines the latency of each transaction, however we can adjust it to suit our needs and the enviroment the nodes are running in.</p>
+</div>
+<div class="paragraph">
+<p>The number of nodes in the cluster is also something we have some control over.  We don&#8217;t want too few nodes, but we get diminishing returns and increasing cost on having more nodes.</p>
+</div>
+<div class="paragraph">
+<p>In our case, we are looking to split the chain to improve efficiency once we have more nodes than we need in a chain.</p>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+The cost of consensus doesn&#8217;t increase with throughput, and is largely constant. i.e. when there is no transactions, confirming nothing is happening is all the nodes will do.
+</td>
+</tr>
+</table>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_transaction_processing">Transaction processing</h3>
+<div class="paragraph">
+<p>The cost of processing transactions increases with throughput, and this determines the limit as to how much each sub-chain can do. Our aim is to make processing each transaction as lightweight as possible. Currently each transaction takes around 2.5 micro-seconds, which means the throughput achievable is 400K per second per sub-chain (1/2.5 us)  We believe this can be improved, however with the option of having thousands of sub-chains, we might never need to do this.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_chain_splitting">Chain splitting</h3>
+<div class="paragraph">
+<p>A straight forward way to split a chain is by address. We could use a bit of the address to determine which chain the address will be managed by.  However, if we have a random arrangement of addresses, as we split, it gets increasingly unlikely that a transaction with only involve one sub-chain.  Ideally we want a high proportion of transaction to involve just one chain to maximise concurrency and reduce overhead.</p>
+</div>
+<div class="paragraph">
+<p>Another approach is to attempt to regionalise the addresses.  For this purpose we have chosen the <a href="https://en.wikipedia.org/wiki/ISO_3166">ISO 3166</a> standard for country and region codes around the world, giving us around 4000 regions which have some meaning geographically.  This follows the assumption that most transactions a person or local business has, will involve other people or businesses in their local area.  A person or business can hold multiple addresses to benifit from local transactions across multiple sub-chains.</p>
+</div>
+<div class="paragraph">
+<p>For example, if I live in New York, or do some business there, I could have an New York address.  The blockchain address in base 32 appears as @usny6897dh38d. The <strong>usny</strong> is the region code. I can trade with any address on the same chain quickly and efficiently.  If I need to send money to another region, this will take longer, but it might take seconds instead of being sub-second.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_weekly_checkpointing">Weekly checkpointing</h3>
+<div class="paragraph">
+<p>Some blockchain solutions require every transaction from the genesis block to be available to work out if any given transaction was successful. The cost of doing this grows both with the number of transactions over time.  This is fine provided that computing power grows faster, however what works for say 10 transactions per second won&#8217;t scale to beyond 100,000 transactions per second.</p>
+</div>
+<div class="paragraph">
+<p>So based on how foriegn exchange systems work, we will be using a weekly cycle.  This has a number of benefits.</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>it reduces the volume of data which needs to be retained to the state at the start of the week and each transaction which has happened in the week.</p>
+</li>
+<li>
+<p>GDPR includes the right to be forgotten. However if a blockchain requires your transaction to be remembered forever, it&#8217;s not clear how this can work.  If you use weekly cycles, your transactions can be forgotten after N weeks (data may need to be retained for legal reasons, but not more than that)</p>
+</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_conclusion">Conclusion</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>There are many design consideration is how to layout a blockchain solution.  My focus is on the sort of problem only a blockchain could solve i.e. with untrusted nodes running the service.  I firmly believe these problems are solvable.</p>
+</div>
+</div>
+</div>]]></description><link>https://peter-lawrey.github.io/2018/03/24/Blockchain-Design-considerations.html</link><guid isPermaLink="true">https://peter-lawrey.github.io/2018/03/24/Blockchain-Design-considerations.html</guid><category><![CDATA[Blockchain]]></category><category><![CDATA[Architecture Design]]></category><dc:creator><![CDATA[Peter Lawrey]]></dc:creator><pubDate>Sat, 24 Mar 2018 00:00:00 GMT</pubDate></item></channel></rss>
