@@ -1,0 +1,7 @@
+= A new start with Asciidoc and HubPress.IO
+Peter Lawrey
+v1.0
+
+I started to migrate to using Asciidoc on Github last week, but the team at http://hubpress.io/ suggested I use HubPress instead. This uses github for storage and hosting but provides a web site feel skin to both editing and more importantly display for readers.
+
+The main feature HubPress lacks at the moment is an RSS feed.  For this reason I will continue to place abstracts and a link to my articles on http://vanillajava.blogspot.co.uk/ until this feed is available.

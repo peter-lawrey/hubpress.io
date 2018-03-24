@@ -1,0 +1,78 @@
+= Microservices in the Chronicle world - Part 4
+Peter Lawrey
+:hp-tags: Microservices, Restarting
+
+A common issue we cover in our workshops is, _how to restart a queue reader after a failure._
+
+The answer is not a simple as you might think.
+
+NOTE: We do an on-site one week workshop to help kick start a new project, with a look at ensuring the infrastructure has a good balance of speed and simplicity.  Often, simplicity is the most important and it will also be fast enough. You can contact mailto:sales@chronicle.software[Chronicle Software Sales] for more details.
+
+=== Knowing when a message should be replayed on startup.
+
+It's not enough to know which messages have been played.  You need to know which messages were completed successfully in a transaction. This assumes you must have each message processed exactly once. Simpler alternatives are:
+
+- Play every message again and ignore duplicates.
+- Play every message from the end (or the last _N_ minutes) and assume anything older than that has expired.
+
+When updating a database, one way to achieve this is to update the index read in a row in the database, this way either:
+
+- The transaction succeeds and the message doesn't need to be played again.
+- The transaction fails and the message does need to be played again.
+
+The important detail is that there is no situation where it is unclear whether the input message should be replayed.
+
+=== Restarting a reader when writing to a queue as output.
+
+In general, we suggest you write your results to an output queue.  An output queue can be a replacement for logging and a means of monitoring, but can also record where each event came from.  
+In particular, and output queue can help:
+
+- Replay messages in the same order, which were sourced from multiple input queue.
+- Ensure that after an upgrade of your software, you honour the decisions you made earlier. i.e. new software replaying the input message might make different decisions. By reading from the output, you ensure that after an upgrade you know what state you should be in.
+- Restart an input queue from the last message successfully outputed for an input from that queue.
+
+In this example, it reads just one unprocessed message.
+
+.Read one message which hasn't been processed.
+[source, java]
+--------------
+try (SingleChronicleQueue in = SingleChronicleQueueBuilder.binary(queuePath)
+        .sourceId(1) // <1>
+        .build();
+     SingleChronicleQueue out = SingleChronicleQueueBuilder.binary(queuePath2)
+             .rollCycle(RollCycles.TEST_DAILY)
+             .build()) {
+
+    MarketDataListener mdListener = out.createAppender()
+            .methodWriterBuilder(MarketDataListener.class)
+            .recordHistory(true) // <2>
+            .get();
+    SidedMarketDataCombiner combiner = new SidedMarketDataCombiner(mdListener);
+    MethodReader reader = in.createTailer()
+            .afterLastWritten(out) // <3>
+            .methodReader(combiner);
+    assertTrue(reader.readOne());
+}
+--------------
+<1> Give the queue a unique id for tracing purposes.
+<2> Write a history for timings and sources for each message processed.
+<3> Read the output queue to see what the last message processed was.
+
+It would be really inefficient to do all this every time. The only line which is required for each message is
+
+[source, java]
+--------------
+reader.readOne();
+--------------
+
+=== Conclusion
+
+While there is a number of ways you could implement restart, if you need it, it is useful to have built-in support for one of the most common ways to do this.
+
+=== In the next part.
+
+https://vanilla-java.github.io/2016/04/02/Microservices-in-the-Chronicle-World-Part-5.html[How does this perform end to end with multiple asynchronous services are how can we measure there?]
+
+
+
+

@@ -1,0 +1,98 @@
+= StringBuffer, and how hard it is to get rid of legacy code
+Peter Lawrey
+:hp-tags: Pet Hates
+
+In 2006, Java 5.0 was released with StringBuilder, a more light weight and sane version of StringBuffer. The https://docs.oracle.com/javase/1.5.0/docs/api/java/lang/StringBuffer.html[Javadoc for Java 5.0 for StringBuffer] notes
+
+[quote]
+----
+As of release JDK 5, this class has been supplemented with an equivalent class designed for use by a single thread, StringBuilder. The StringBuilder class should generally be used in preference to this one, as it supports all of the same operations but it is faster, as it performs no synchronization.
+----
+
+Having `synchronized` on `StringBuffer` was never a good idea. The basic problem is that one operation is never enough. A single `.append(x)` is not useful without another `.append(y)` and a `.toString()`. While individual methods were thread safe, you couldn't make multiple calls to StringBuffer without race conditions.  Your only option is external synchronized or using `ThreadLocal` StringBuilders (or more obviously create them on demand)
+
+So more than ten years later, no one uses StringBuffer!? Certainly not for new functionality!?
+
+=== How many objects does this create?
+
+As I have noted before, the JVM creates many objects on start up or starting core libraries.  Much more than you might expect making question like the following are a bit meaningless;
+
+.How many objects does this create?
+[source, Java]
+----
+public class Main {
+    public static void main(String... args) {
+        System.out.println("Hello " + "world");
+    }
+}
+----
+
+The Oracle JVM version 8 creates about 10,000 objects running this program.
+
+=== How many StringBuffers does this create?
+
+Ok, so it has to create lots of objects to start the JVM, but legacy classes with a drop in replacement which have been around for 10+ years wouldn't be used right?
+
+.How many StringBuffers does this create?
+----
+public class Main {
+    public static void main(String[] args) throws IOException {
+        System.out.println("Waiting");
+        System.in.read();
+    }
+}
+----
+
+While the process is running we can run
+
+[source, bash]
+----
+jmap -histo {pid} | grep StringBuffer
+----
+
+and this prints
+
+[source, bash]
+----
+  18:           129           3096  java.lang.StringBuffer
+----
+
+The `129` is for the number of instances produced on Java 8 update 121.  This is lower than the last time I checked about a year ago, but still a little surprising.
+
+=== So there is still some legacy code
+
+What about a new feature like lambdas and Streams.  They were written entirely in the last ten years and they use some external libraries such as Objectwebs ASM, but these developers really know the internals of the JVM and is designed to be as light weight as possible.
+
+.How many StringBuffers does this create?
+----
+public class Main {
+    public static void main(String[] args) throws IOException {
+        IntStream.range(0, 4).forEach(System.out::println);
+        System.out.println("Waiting");
+        System.in.read();
+    }
+}
+----
+
+So running `jmap` again, what do we see?
+
+[source, bash]
+----
+  17:           545          13080  java.lang.StringBuffer
+----
+
+So an additional 416 objects using a simple Stream and a lambda!
+
+BTW The above program creates 
+
+[source, bash]
+----
+Total         35486        4027224
+----
+
+or 35,486 objects!
+
+== Conclusion
+
+Using `StringBuffer` on startup doesn't make much difference, but given it has a well known, drop in replacement, and it is still used, even in new functionality more than ten years later shows how hard it can be to clean up legacy code or to change thinking to get people to use best practice libraries.
+

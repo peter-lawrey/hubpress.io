@@ -1,0 +1,126 @@
+= Batching and Low Latency
+Peter Lawrey
+:hp-tags: Microservices, Batching, Low Latency
+
+NOTE: This is testing the next release of Chronicle Queue 4.5.0
+
+=== Why batch your data?
+
+Batching of multiple messages or updates into a single transaction is a common technique for improving performance, in particular it is useful for increasing throughput (messages per second) when the latency (time to process a single message) is high.  However when latencies are low, can batching still help?
+
+A couple of weeks ago, I was looking at testing and optimising our Chronicle Queue replication over TCP.  One of the first tests I did was to see how batching changed the performance and it made a dramatic difference, and I assumed this was a bug, batching shouldn't help a well tuned low latency system.  Now I have had a chance to optimise replication, does batching make much difference?
+
+=== Why do batches help/hinder?
+
+When your system has an operation with a significant latency, you can utilise more of the available bandwidth by increasing the batch size.
+
+Imagine you have a questionaire with 10 questions you want to ask someone. You could send an email for each question and wait for the response to each question before asking the next one. Say it takes 1 minute to answer each question but 10 minutes to send an email, have the person notice it and for you to notice the response.
+
+- sending one question at a time, means each question takes 10 + 1 minutes or 110 minutes in total.
+- sending all 10 questions at once means that the whole questionaire takes 10 + 1 * 10 minutes, or 20 minutes in total.
+
+It makes sense to ask all your questions at once and get the replies in one go.
+
+However, there is a problem, what if you
+
+- don't know all the questions in advance because you are still thinking of them. You have to wait to think of the questions, and you might not know how long this will take.
+- might need to ask each question in response to a previous answer.
+
+The longer you wait to build a batch, the more you delay the processing of the messages you have.
+
+Batching works best when you know how many messages you are about to get or you know what delay would be acceptable and you can delay sending the messages or committing the transaction for that amount of time. 
+
+What if you want to process each message as soon as possible?
+
+=== What is being tested?
+
+I am testing the latency under a fixed throughput for publishing a small 40 byte message including time to
+
+- write the message to the persisted queue.
+- read the message and write over TCP.
+- read the TCP socket and write it to a copy of the queue
+- read the message from the queue copy.
+
+To correct for co-ordinated omission, the sending timestamp used is the time the message should have been sent, indead of the time it was actually sent. For the received time, I used `System.nanoTime()` to get high resolution timing. The replication is over loopback for a consistent nanoTime(). As I am interested in the outliers, I am assuming the overhead using a low latency 10 GigE network wouldn't impact these results significantly.  The highest throughput test here would use less than 20% of a 10 GigE network connection as each message is small.
+
+The test spends 30 seconds warming up, and 120 seconds running.  The distribution of latencies for each message is summarised.
+
+As I have discussed in prevous posts, I am focusing on minimising the 99%ile latency (worst 1 in 100).  On the system, I am reporting no more than 100 million messages per second as this is close to the point there the 99% starts to increase dramatically. i.e. it is close the limit of what this system can process in soft real time.
+
+A Centos 7 machine with i7-4790 and 32 GB of memory was used.
+
+=== End to End latency for different batch sizes
+
+.99%ile latency end to end
+|=======
+| Batch Size | 10 million events per minute | 60 million events per minute | 100 million events per minute 
+| 1 | 20 &micro;s |  28 &micro;s | [red]#176 &micro;s# 
+| 2 | 22 &micro;s |  29 &micro;s | 30 &micro;s 
+| 5 | 38 &micro;s |  22 &micro;s | 27 &micro;s 
+| 10 | 72 &micro;s |  26 &micro;s | 27 &micro;s 
+| 20 | 125 &micro;s |  34 &micro;s | 31 &micro;s 
+|=======
+
+NOTE: 1 &micro;s is 0.001 ms or 1 millionth of a second.
+
+So you can see that batching helps for size of one to five 40 byte messages when the delay between messages is small. However when the delay between messages is relatively large, in this case, every 6 &micro;s, having to wait for enough messages to build a batch hurts the latency.
+
+The high latency for the single message at a time for 100 Mmsg/s may yet prove to be a performance bug which can be solved later, but for now, batching could help reduce the jitter, but you don't want any more batching so you need to avoid any impact.  In this case, I would consider a batch of two, rather than a larger batch size.
+
+=== Why not look at the typical or average latency?
+
+The typical/average latencies are usually better which is why vendors like to report them.  However, they only tell you what the performance looks like momentarily when everything is going well.  By looking at the 99%ile or 99.9%ile you are looking at how something performs when things are not going well.
+
+By comparison, the typical latencies all look fine, and you would not know that batching might help at 100 messages per minute.
+
+.50%ile latency end to end
+|=======
+| Batch Size | 10 million events per minute | 60 million events per minute | 100 million events per minute 
+| 1 | 10 &micro;s | 13 &micro;s | 16 &micro;s
+| 2 | 13 &micro;s | 13 &micro;s | 13 &micro;s 
+| 5 | 22 &micro;s | 13 &micro;s | 13 &micro;s 
+| 10 | 36 &micro;s | 15 &micro;s | 13 &micro;s 
+| 20 | 68 &micro;s | 20 &micro;s | 15 &micro;s 
+|=======
+
+Having to wait for a whole batch adds latency and this can be far higher than the time you save. You want your batching to be no larger than necessary. 
+
+=== How is batching used internally?
+
+While batching messages published made a little difference in the example above, we use batching internally because it can make a big difference when passing lots of small messages over TCP.
+
+As the overhead of passing data over TCP is relatively high, it makes sense to group available data up to some threshold such as 4 KB.  When reading the queue you can determine whether more data is pending as you read it.
+
+In particular, making a socket write can be 5 - 10 &micro;s. However we are writing a message around a micro-second or less, this would add an enormous amount to every message if they were sent individually.  By having a background thread batching up these messages we can reduce the latency impact of the socket write.
+
+=== Conclusion
+
+Batching can be helpful in reducing the impact of latency to improve throughput.  When you are reaching the limit of the throughput you can achieve, batching can improve the overhead and give you higher throughputs and lower latencies.
+
+However, batching is not always possible or appropriate and you want a solution which has low latencies even when you are not reaching the limits of your throughput.
+
+=== A quick look at the 99.9%ile.
+
+These worst 1 in 1000 has mixed result which needs further investigation.  I suspect, the OS might be a cause of this jitter. Note: we didn't use thread pinning and that might have made a difference.
+
+.99.9%ile latency end to end
+|=======
+| Batch Size | 10 million events per minute | 60 million events per minute | 100 million events per minute 
+| 1 | 901 &micro;s | 705 &micro;s | 5,370 &micro;s
+| 2 | 500 &micro;s | 1,610 &micro;s | 2,000 &micro;s 
+| 5 | 80 &micro;s | 1,540 &micro;s | 2,160 &micro;s 
+| 10 | 3,080 &micro;s | 1,470 &micro;s | 2,000 &micro;s 
+| 20 | 336 &micro;s | 1,210 &micro;s | 1,670 &micro;s 
+|=======
+
+.99.9%ile latency to publish without replication
+|=======
+| Batch Size | 10 million events per minute | 60 million events per minute | 100 million events per minute 
+| 1 | 1.2 &micro;s | 1.3 &micro;s | 1.5 &micro;s
+| 2 | 1.2 &micro;s | 1.3 &micro;s | 1.5 &micro;s 
+| 5 | 2.4 &micro;s | 1.5 &micro;s | 1.6 &micro;s 
+| 10 | 9.5 &micro;s | 1.7 &micro;s | 1.8 &micro;s 
+| 20 | 11 &micro;s | 12 &micro;s | 2.1 &micro;s 
+|=======
+
+More investigation is required to draw any conclusions.

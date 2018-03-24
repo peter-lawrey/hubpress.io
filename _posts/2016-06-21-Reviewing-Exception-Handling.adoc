@@ -1,0 +1,381 @@
+= Reviewing Exception Handling
+Peter Lawrey
+:hp-tags: Exceptions
+
+When developing an application it can be hard enough to get the happy path working, let alone worry about what might happen when something goes wrong.
+
+I have asked a number of developers recently what they do when they get an exception and usually they log it or pass it back to the user.
+
+What are some alternatives? If you have to pass on the exception how might you do that?
+
+=== When to consider exception handling?
+
+Ideally, you should be only catching an exception when you know what to do with it. If you don't think you can add value, pass it back to the caller.  I highly recommend letting your IDE manage the updating of the method signature, as this can be tedious to do manually.
+
+Even if you give exception handling some consideration in your code, it is worth doing a periodic review of your exception handling code to make sure that they are being handled appropriately.
+
+
+== Handling the Exception
+
+=== Catch an Exception to fall back.
+
+When an expected Exception occurs you can fall back to a default result.
+
+.Simple fallback
+[source, Java]
+----
+private static String getHostName0() {
+    try {
+        return InetAddress.getLocalHost().getHostName();
+    } catch (UnknownHostException e) {
+        return "localhost";
+    }
+}
+----
+
+
+This method looks for a field in a class. If this fails it looks for a field in it's super class. This fall back behaviour requires that the appropriate exception is caught.
+
+NOTE: The discard exception is added to the original with `addSuppressed`.  Whether this is a good idea, depends on each case.
+
+.Fallback on a specific exception
+[source, Java]
+----
+/**
+ * Get the Field for a class by name.
+ *
+ * @param clazz to get the field for
+ * @param name  of the field
+ * @return the Field.
+ * @throws IllegalArgumentException if no field with that name could be found.
+ */
+public static Field getField(Class clazz, String name) throws IllegalArgumentException {
+     try {
+         Field field = clazz.getDeclaredField(name);
+         field.setAccessible(true);
+         return field;
+
+     } catch (NoSuchFieldException e) {
+         Class superclass = clazz.getSuperclass();
+         if (superclass != null)
+             try {
+                 return getField(superclass, name);
+             } catch (Exception e2) {
+                 e.addSuppressed(e2);
+             }
+         throw new IllegalArgumentException(clazz + " does not have a public field " + name, e);
+     }
+ }
+----
+
+=== Signal for special handling.
+
+Special handling may be a delibrate exception to say this component is no longer valid and shouldn't be used again.
+
+.Catch an Exception in a nested call and remove a subscriber which is no longer valid.
+[source, Java]
+----
+try {
+ for (int i = 0; i < kvStore.segments(); i++)
+     kvStore.entriesFor(i, e -> subscriber.onMessage(e.getKey(), e.getValue()));
+
+} catch (InvalidSubscriberException dontAdd) {
+ topicSubscribers.remove(subscriber);
+}
+----
+
+NOTE: The checked exception is thrown inside a lambda which expects this specific exception.
+
+=== Wrap an Exception with AssertionError
+
+In this case, the Field returned by getField shouldn't ever throw an IllegalAccessException, so it has been wrapped with an AssertionError.
+
+It only make senses to wrap an Exception with an AssertionError when you know this is something which should never happen (not something you hope will never happen)
+
+.Exception is not possible
+[source, Java]
+----
+/**
+ * get a the value of a field by name.
+ * <p>
+ * If the name has a path with a / it is split into names and navigated into the object. e.g. "a/b" will look for a field "b" in the object in field "a"
+ * <p>
+ * If any reference in the path is null, the return is null.
+ *
+ * @param obj  Object to extract the value from
+ * @param name path to the field.
+ * @return the value of the field as an object if found, or null if any field in the path was null.
+ * @throws IllegalArgumentException if the field could not be found.
+ */
+public static <V> V getValue(Object obj, String name) throws IllegalArgumentException {
+    for (String n : name.split("/")) {
+        Field f = getField(obj.getClass(), n);
+        try {
+            obj = f.get(obj);
+            if (obj == null)
+                return null;
+        } catch (IllegalAccessException e) {
+            throw new AssertionError(e);
+        }
+    }
+    return (V) obj;
+}
+----
+
+=== Set the interrupted flag if caught
+
+When a thread is interrupted, it should remain so until the overall task is
+
+[source, Java]
+----
+/**
+ * Silently pause for milli seconds.
+ *
+ * @param millis to sleep for.
+ */
+public static void pause(long millis) {
+    long timeNanos = millis * 1000000;
+    if (timeNanos > 10e6) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupted();
+        }
+    } else {
+        LockSupport.parkNanos(timeNanos);
+    }
+}
+----
+
+=== Passing on the exception
+
+==== Using a callback to handle the exception.
+
+Using a callback allows a developer using a library to control how exceptions should be handled.
+
+- for production you might want to shutdown the whole server on a fatal error, log warnings and ignore debug messages.
+- for unit tests you might wish to capture your exceptions to see if any error occurred, or only the expected error occured.
+
+.An interface you could call in the event of an Exception.
+[source, Java]
+----
+@FunctionalInterface
+public interface ExceptionHandler {
+    default void on(Class clazz, Throwable thrown) {
+        on(clazz, "", thrown);
+    }
+
+    default void on(Class clazz, String message) {
+        on(clazz, message, null);
+    }
+
+    /**
+     * A method to call when an exception occurs. It assumes there is a different handler for different levels.
+     * 
+     * @param clazz the error is associated with, e.g. the one in which it was caught 
+     * @param message any message associated with the error, or empty String.
+     * @param thrown any Thorwable caught, or null if there was no exception.
+     */
+    void on(Class clazz, String message, Throwable thrown);
+}
+----
+
+We have an ExceptionHandler which opens a web page on Google or Stackoverflow approriate for the error, or using a fallback Exception handler.
+
+[source, Java]
+----
+    try {
+        if (Jvm.isDebug() && Desktop.isDesktopSupported())
+            Desktop.getDesktop().browse(new URI(uri));
+        else
+            fallBack.on(clazz, message, t);
+
+    } catch (Exception e) {
+        fallBack.on(clazz, message, t);
+        fallBack.on(getClass(), "Failed to open browser", e);
+    }
+----        
+
+==== Additional printing for debugging only.
+
+Sometimes an error which would be too "noisy" for production code might be useful in trying to trace a bug in the code.
+
+In this case, we check whether the code is running in the debugger and log an exception we normally expect to handle queiter or silently.
+
+.Additional logging when attempting to reconnect to a TCP server.
+[source, Java]
+----
+if (Jvm.isDebug())
+    e.printStackTrace();
+// continue handling the exception.
+----
+
+Using `printStackTrace` makes it clearer this is not intended for production use and makes it easier to find and remove later.
+
+==== Adding the Exception to the result.
+
+In a method which does a best attempt at decoding some data, and the caller wants to see as much as could be decoded, even if an exception occurred.
+
+.Add the Exception to the StringWriter.
+[source, Java]
+----
+} catch (Exception e) {
+    e.printStackTrace(new PrintWriter(writer));
+    }
+----
+
+
+=== Passing on a check exception so it can be caught
+
+==== Rethrow as an unchecked exception.
+
+In this case, rather than wrap the checked exception as an unchecked one, the Exception can be blindly re-thrown as the original exception
+
+This is useful when a checked exception is thrown inside a lambda which doesn't expect a checked exception.
+
+[source, Java]
+----
+public List<String> collectFiles(List<String> filenames) throws IOException {
+    return filenames.stream()
+            .flatMap(f -> {
+                try {
+                    return Files.lines(Paths.get(f));
+                } catch (IOException e) {
+                    throw Jvm.rethrow(e);
+                }
+            })
+            .collect(Collectors.toList());
+}
+----
+
+Where Jvm.rethrow is implemented as follows
+
+[source, Java]
+----
+/**
+ * Cast a CheckedException as an unchecked one.
+ *
+ * @param throwable to cast
+ * @param <T>       the type of the Throwable
+ * @return this method will never return a Throwable instance, it will just throw it.
+ * @throws T the throwable as an unchecked throwable
+ */
+@SuppressWarnings("unchecked")
+public static <T extends Throwable> RuntimeException rethrow(Throwable throwable) throws T {
+    throw (T) throwable; // rely on vacuous cast
+}
+----
+
+However, this is really a hack to get around the fact that the `Function` used, doesn't support a checked exception.
+A better solution, if you can choose the type of lambda is to have one which expects an Exception. See next.
+
+==== Capturing a Throwable thrown in a plain thread in a unit test.
+
+Instead of an Executor service or a parallelStream(), sometimes you just want to use a plain thread for testing purposes.  You still need an exception thrown in that thread to cause the test to fail.
+
+[source, Java]
+----
+Throwable[] thrown = { null };
+
+Thread t = new Thread(() -> {
+    try {
+        // something
+    } catch (Throwable e) {
+        thrown[0] = e;
+    }
+});
+t.start();
+
+// check something.
+
+t.join();
+
+if (thrown[0] != null)
+    throw thrown[0];
+----
+
+=== Using a lambda which expects a checked exception.
+
+We have a number of functional interfaces which work just like the built in classes of a similar name except they expect to throw a checked exception.
+
+.Three of the FunctionalLambdas which can throw a Checked Exception
+[source, Java]
+----
+@FunctionalInterface
+public interface ThrowingConsumer<I, T extends Throwable> {
+    /**
+     * Performs this operation on the given argument.
+     *
+     * @param in the input argument
+     */
+    void accept(I in) throws T;
+}
+
+@FunctionalInterface
+public interface ThrowingFunction<I, R, T extends Throwable> {
+    /**
+     * Applies this function to the given argument.
+     *
+     * @param in the function argument
+     * @return the function result
+     */
+    R apply(I in) throws T;
+}
+
+@FunctionalInterface
+public interface ThrowingSupplier<V, T extends Throwable> {
+    /**
+     * Gets a result.
+     *
+     * @return a result
+     */
+    V get() throws T;
+}
+----
+
+==== Using a ThrowingConsumer
+
+In the following example, you can pass a consumer to `forEachChild` which can throw a checked exception, which is then thrown back to the caller.
+
+.If the acceptor throws a checked Exception, the method throws the same Exception
+[source, Java]
+----
+public <T extends Throwable> void forEachChild(@NotNull ThrowingConsumer<Asset, T> consumer) throws T {
+    for (Asset child : children.values()) {
+        consumer.accept(child);
+    }
+}
+----
+
+.onMessage can throw an InvalidSubscriberException which throw out of this method.
+[source, Java]
+----
+void bootstrapTree(@NotNull Asset asset, @NotNull Subscriber<TopologicalEvent> subscriber) throws InvalidSubscriberException {
+    asset.forEachChild(c -> {
+        subscriber.onMessage(ExistingAssetEvent.of(asset.fullName(), c.name()));
+        bootstrapTree(c, subscriber);
+    });
+}
+----
+
+=== Using temporarily checked exception.
+
+One way to ensure your documentation and handling of unchecked exception is correct is to make them temporarily checked.  I recently did this for one of our custom exceptions and ended up changing 65 files. In many cases, the exception was documented as occuring, but didn't and in many cases it could occur but wasn't documented.  In a couple of cases, this forced me to consider whether this was the most appropriate exception to be throwing and I changed it.  I would say I ended up fixing around 6 bugs as a part of this review.
+
+We also have a checked version of many built in unchecked exceptions and we use this to review those as well from time to time. https://github.com/OpenHFT/Chronicle-Core/tree/master/checked-exceptions
+
+=== What do we do in our libraries?
+
+I reviewed our OpenHFT libraries in terms of exception handling and refactored it quite a bit as well as fixing a number of issues. Afterwards the profile looked like this
+
+image::Exception-handling-mix.png[]
+
+In the end about 30% were hndled in the code itself. The FATAL ones mean the code is broken, and the DEBUG ones are expected to be ignored, possibly logged.  The wrapped and rethrown exceptions expect the caller to handle the exception in some way.
+
+=== Conclusion
+
+Knowing when to consider about exception handling and what to do about it is not easy.  Having checked exceptions can help you with that revirew when you are ready to do that.  
+
+Until you are ready to think about how to handle these exceptions I suggest passing the exception to the caller rather than logging them and pretending they didn't happen.
+
+

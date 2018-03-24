@@ -1,0 +1,24 @@
+= MicroServices is about applying a group of Best Practices
+:hp-tags: Microservices, Best Practice
+
+=== Microservices Denial
+
+A number of times I have heard that they can't image their organisation using Microservices.
+The reason I find this surprising is that I know those people are using the principles already.
+
+I can understand that they feel no need to join the hype around microservices, but the reality is, like it or not, 
+you are most likely using some best practices Microservices advocates.
+
+Stages of denial
+
+ - It all seems like hype, we don't go in for that.
+ - Perhaps not all hype, but does it really mean anything.
+ - It sounds pretty familiar.
+ - It sounds like what we are doing already.
+ 
+Formally or informally, most likely you have been following some best practices already.
+
+=== Adopting Best Practices.
+
+Perhaps you don't like the name Microservices, and perhaps not all the different things people 
+associate with Microservices are right for your team, your projects.

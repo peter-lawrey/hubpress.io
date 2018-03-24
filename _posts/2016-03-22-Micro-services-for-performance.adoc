@@ -1,0 +1,141 @@
+= Micro-services for performance
+:published_at: 2016-03-22
+:hp-tags: Microservices, design
+
+== Overview
+
+*Microservices* is a buzz word at the moment. Is it really something original or based on established best practices? There are some disadvantages to the way microservices have been implemented, but can these be solved?
+
+== Component testability and consistency
+
+Once you have assembled a large system, it can be hard or even impossible to profile where the highest delays come from. You can profile for average *latency* or *throughput*, but to achieve consistent latencies, you need to analyse key portions of your system.  This is where having simple components which run independently, and can be tested as stand alone, could help you achieve the consistency of your system needs end to end.
+
+== The UNIX Philosophy
+
+Many of the key concepts of microservices have been used in distributed systems for many years.  
+
+Microservices have much in common with the  https://en.wikipedia.org/wiki/Unix_philosophy[Unix Philosophy]footnote:[Wikipedia. (2016). Unix philosophy. Online. Available at: https://en.wikipedia.org/wiki/Unix_philosophy. Accessed: Mar. 2016]
+
+https://en.wikipedia.org/wiki/Unix_philosophy#Mike_Gancarz:_The_UNIX_Philosophy[Mike Gancarz]footnote:[Wikipedia. (2016). Unix philosophy. Online. Available at: https://en.wikipedia.org/wiki/Unix_philosophy#Mike_Gancarz:_The_UNIX_Philosophy. Accessed Mar. 2016] is quoted as summed these principles as follows:
+
+""
+* Small is beautiful.
+* Make each program do one thing well.
+* Build a prototype as soon as possible.
+* Choose portability over efficiency.
+* Store data in flat text files.
+* Use software leverage to your advantage.
+* Use https://en.wikipedia.org/wiki/Shell_script[shell scripts]footnote:[Wikipedia. (2016). Shell script. Online. Available at: https://en.wikipedia.org/wiki/Shell_script. Accessed Mar.  2016] to increase leverage and portability.
+* Avoid captive user interfaces.
+* Make every program a filter.
+""
+
+The https://en.wikipedia.org/wiki/Microservices#Philosophy[Microservices Architecture]footnote:[Wikipedia. (2016). Microservices. Online. Available at: https://en.wikipedia.org/wiki/Microservices#Philosophy. Accessed Mar. 2016] is the UNIX Philosophy applied to *distributed systems*.
+
+Philosophy of microservices architecture essentially equals the Unix philosophy of "Do one thing and do it well". It is described as follows:
+
+""
+* The services are small - fine-grained to perform a single function.
+* The organization culture should embrace automation of deployment and testing. This eases the burden on management and operations.
+* The culture and design principles should embrace failure and faults, similar to anti-fragile systems.
+* Each service is elastic, resilient, composable, minimal, and complete.
+""
+
+There are https://en.wikipedia.org/wiki/Microservices#Criticism[disadvantages]footnote:[Wikipedia. (2016). Microservices. Online. Available at: https://en.wikipedia.org/wiki/Microservices#Criticism. Accessed Mar. 2016] to using a microservices archictecture some of which are;
+
+""
+* Services form information https://en.wikipedia.org/wiki/Barrier_(computer_science)[barriers]footnote:[Shirako, J., et al (2008). Phasers. Proceedings of the 22nd annual international conference on Supercomputing - ICS '08. Online. Available at: https://en.wikipedia.org/wiki/Barrier_(computer_science). Accessed Mar. 2016].
+* The architecture introduces additional complexity and new problems to deal with, such as network latency, http://networking.xtreemhost.com/wp/?p=279&ckattempt=1[message formats]footnote:[Luca, A. (2016). Message Formatting. Online. Available at: http://networking.xtreemhost.com/wp/?p=279&ckattempt=1. Accessed Mar. 2016], 
+http://searchnetworking.techtarget.com/definition/load-balancing[load balancing] footnote:[Rouse, M. (2016). What is load balancing? - Definition from WhatIs.com. Online. Available at: http://searchnetworking.techtarget.com/definition/load-balancing. Accessed Mar. 2016] and 
+http://searchdisasterrecovery.techtarget.com/definition/fault-tolerant[fault tolerance]footnote:[Rouse, M. (2016). What is fault-tolerant? - Definition from WhatIs.com. Online. Available at: http://searchdisasterrecovery.techtarget.com/definition/fault-tolerant. Accessed Mar. 2016]. Ignoring one of these belongs to the "fallacies of distributed computing".
+* Testing and deployment are more complicated.
+* The complexity of a https://en.wikipedia.org/wiki/Monolithic_application[monolithic application]footnote:[Wikipedia. (2016). Monolithic application. Online. Available at: https://en.wikipedia.org/wiki/Monolithic_application Accessed Mar. 2016] is only shifted into the network, but persists.
+* Too-fine-grained microservices have been criticized as an anti-pattern.
+""
+
+Can we get the best features of a monolith, and micro-services? Does it have to be one or the other?  Should we not use the approach which best suits our problem.  One of the key aspects of Micro-services is controlled deployment of an application. In which case, shouldn't we be able to deploy components as a Monolith or Micro-services where it makes the most sense to do so.
+
+Proposed alternatives to nanoservices include;
+
+""
+* Package the functionality as a *library*, rather than a service.
+* Combine the functionality with other functionalities, producing a more substantial, useful service.
+* Refactor the system, putting the functionality in other services or redesigning the system.
+""
+
+= How can we get the best of both worlds?
+
+== Make sure your components are composable.
+
+If your components are composable, then they are always the right size.  You can combine them as needed into a collection of services, or everything into one service.
+
+This is particularly important for testing and *debugging*.  You need to know a group of business components work together without the infrastructure (eg. Middleware) getting in the way.  For the purposes of a unit test, you may want to run all your components in one thread and have one directly call the other.  This can be no more complicated than testing components of a monolith where you can step through your code from one component to another and see exactly what is happening.
+
+Only once your components work together correctly without infrastructure, do you need to test how they behave with infrastructure.
+
+== Make your infrastructure as fast as your application needs.
+
+Low latency trading systems are distributed systems, and yet they also have very stringent latency requirements.  Most trading systems are designed to care about latencies much faster than you can see.  In the Java space, it is not unusual to see a trading system which needs to have latencies below 100 micro-seconds, 99% of the time or even 99.9% of the time.  This can be achieved using commodity hardware in a high level language like Java.
+
+The keys to achieving low latencies are;
+
+* low latency infrastructure for messaging and logging. Ideally around a 1 micro-second for short messages,
+* a minimum of network hops,
+* a high level of reproduceability of real production load so you can study the 99%tile (worst 1 %) or 99.9%tile (worst 0.1%) latencies,
+* viewing each *CPU core* as having a specific task/service, with it's own CPU cache data and code. The focus is on the distribution of your application between cores (rather than between computers).
+
+Your L2 cache coherence bus is your messaging layer between high performance services.
+
+image::L2-Cache-Coherence-small.jpg[L2 Cache, 230, link="http://slideplayer.com/slide/3348635/"]
+
+You can perform a CAS operation on the same data between two different cores. Here, each thread toggles the value set by the other thread with a round trip time of less than 50 nano-seconds on http://ark.intel.com/products/codename/29900/Sandy-Bridge#@All[Sandy Bridge processors]footnote:[Intel® ARK (Product Specs). (2016). Products (Formerly Sandy Bridge). Online. Available at: http://ark.intel.com/products/codename/29900/Sandy-Bridge#@All. Accessed Mar. 2016], less on newer generations.
+
+Examples of low latency instructure in Java are;
+
+* https://github.com/real-logic/Aeron[Aeron]footnote:[GitHub. (2016). real-logic/Aeron. Online. Available at: https://github.com/real-logic/Aeron. Accessed Mar. 2016] - A reliable UDP transport,
+* https://github.com/OpenHFT/Chronicle-Queue[Chronicle Queue] - A persisted queue for messaging and logging.
+
+These transports have different advantages in terms of handling load balancing and *failover*.
+
+== Make the message format a configuration consideration.
+
+There is a number of competing concerns in message formats. You want;
+
+* Human readability so you can validate the messages are not only behaving correctly, but doing so in the manner you expect. I am often surprised how many issues I find by dumping a storage file or the message logs.
+* Machine friendly binary format for speed.
+* Flexability in terms of future schema changes. Flexability means adding redundancy so the software can cope with adding/removing fields and changing their data types in future. This redundancy is a waste if you don't need it.
+
+Ideally, you can choose the best option at testing/deployment time.
+
+Some examples of *serialization libraries* where you can change the actual *wire format* to suit your needs are:
+
+* https://github.com/FasterXML/jackson-core[Jackson Speaming API]footnote:[GitHub. (2016). FasterXML/jackson-core. Online. Available at: https://github.com/FasterXML/jackson-core. Accessed Mar. 2016] - Which supports JSON, XML, CSV, CBOR (a binary format),
+* https://github.com/OpenHFT/Chronicle-Wire[Chronicle Wire] - Which supports object serialization YAML, a number of different forms of Binary YAML, JSON, CSV, Raw data.
+
+What I found useful in http://www.yaml.org/spec/1.2/spec.html[YAML]footnote:[Ben-Kiki, et al (2009). YAML Ain’t Markup Language (YAML™) Version 1.2. Online. Available at: http://www.yaml.org/spec/1.2/spec.html. Accessed Jul. 2016] verses JSON, is the cleaner syntax which is designed to be human readable, rather than the subset of another language, the natural support for data types, comments, binary content and message seperators.
+
+== Conclusion
+
+I think there is a lot of good ideas on how to use microservices, and I think many of the criticisms around them are based on how they have been implemented and I believe they are solvable.
+
+== Glossary
+
+*CPU core*- http://www.makeuseof.com/tag/processor-core-makeuseof-explains-2/["A processor core is a processing unit which reads in instructions to perform specific actions."]footnote:[Stieben, D. (2012). What Is A Processor Core? MakeUseOf Explains. Online. Available at: http://www.makeuseof.com/tag/processor-core-makeuseof-explains-2/. Accessed Jul. 2016]
+
+*Debugging*- the process of searching for and fixing defects in code.
+
+*Distributed System*- A collection of autonomous computers linked in a network by https://en.wikipedia.org/wiki/Middleware[middleware]footnote:[Wikipedia. (2016). Middleware. Online. Available at https://en.wikipedia.org/wiki/Middleware. Accessed Jul.2016]. A test can be distributed between a number of systems.
+
+*Failover*- http://www.webopedia.com/TERM/F/failover.html["A backup operation that automatically switches to a standby server or network if the primary system fails or is temporarily shut down for servicing."]footnote:[Webopedia.com. (2016). What is failover? Webopedia Definition. Online. Available at: http://www.webopedia.com/TERM/F/failover.html. Accessed Jul. 2016]
+
+*Latency*- The time an individual operation takes. http://www.webopedia.com/TERM/L/latency.html["Together, latency and bandwidth define the speed and capacity of a network."]footnote:[Webopedia.com. (2016). What is Latency? Webopedia Definition. Online. Available at: http://www.webopedia.com/TERM/L/latency.html. Accessed Jul. 2016]
+
+*Library*- http://www.webopedia.com/TERM/L/library.html["A collection of precompiled routines that a program can use."]footnote:[Webopedia.com. (2016). What is Library? Webopedia Definition. Onilne. Available at: http://www.webopedia.com/TERM/L/library.html. Accessed Jul. 2016]
+
+*Microservices*- Independantly deployable programmes that act as components in a larger network. 
+
+*Throughput*- The rate of data or messages transferred which is processed in a certain amount of time. This rate is written in terms of throughput, e.g a road could have a throughput of 10 cars per minute.
+
+*Serialization libraries*- The process that translates data into a format that can be consumed by another system. 
+
+*Wire format*- A defined way for sending data between mechines as bytes.

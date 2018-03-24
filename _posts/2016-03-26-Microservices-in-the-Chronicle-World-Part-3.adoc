@@ -1,0 +1,157 @@
+= Microservices in the Chronicle World - Part 3
+:hp-tags: Microservices, JMH, Chronicle-Queue
+
+One of the problems with using microservices is performance.  *Latencies* can be higher due to the cost of *serialization*, messaging and deserialization, and this reduces *throughput*.  In particular, poor throughput is a problem because the reason we are designing a http://searchdatacenter.techtarget.com/definition/scalability[scalable system]footnote:[Rouse, M. (2016). What is scalability? - Definition from WhatIs.com. Online. SearchDataCenter. Available at: http://searchdatacenter.techtarget.com/definition/scalability [Accessed Mar. 2016] is to increase throughput.
+
+In https://vanilla-java.github.io/2016/03/24/Microservices-in-the-Chronicle-world-Part-2.html[Part 2] we saw how we can take a component and add a transport to it to make it a service.
+
+NOTE: Passing data between threads is not free. This information needs to be passed over the L2 CPU Cache Coherence bus. If you do this in an uncontrolled manner and just let the application discover the objects it needs to pull from one thread's cache to its own, it can be slower than only passing the data you need, streamed serially. Chronicle Queue gives greater transparency by recording every event, allowing you to optmise exactly what one thread passes to another.
+
+IMPORTANT: In one low latency trading system, before adding Chronicle Queue, the average latency from read in to write out was 35 micro-seconds, after utilising Chronicle Queue to optimie the data passed between threads the latency dropped to 23 micro-seconds. Using Chronicle Queue also showed up issues which were not apparent before, and with replay of events, gave confidence these issues had been fixed.
+
+=== Benchmarking with JMH
+
+http://openjdk.java.net/projects/code-tools/jmh/[JMH]footnote:[Openjdk.(2016). OpenJDK: jmh. Online. Available at: http://openjdk.java.net/projects/code-tools/jmh/. Accessed Mar. 2016](Java Micro-benchmark Harness) is an excellent tool for measuring the throughput and sampling latencies end to end.  We can look at an example of what it is good for with regard to our sample microservice.  
+
+We create our own micro-benchmark harness, in Chronicle-Core, for measuring asynchronmos tasks run across multiple threads where you want to time individual portions (which will be covered in Part 4). For now we will look at latencies end-to-end.
+
+=== JMH latency test of our service
+
+With JMH we can measure timings for the end to end benchmark. We have to include a producer to drive the test rather than time a service standalone. We are looking at the single threaded timings.
+
+.Our JMH benchmark
+[source, java]
+----
+@Setup
+public void setup() {
+    String target = OS.TMP;
+    upQueuePath = new File(target, "ComponentsBenchmark-up-" + System.nanoTime());
+    upQueue = SingleChronicleQueueBuilder.binary(upQueuePath).build(); // <1>
+    smdWriter = upQueue.createAppender().methodWriter(SidedMarketDataListener.class);  // <2>
+
+    downQueuePath = new File(target, "ComponentsBenchmark-down-" + System.nanoTime());
+    downQueue = SingleChronicleQueueBuilder.binary(downQueuePath).build();  // <3>
+    MarketDataListener mdWriter = downQueue.createAppender().methodWriter(MarketDataListener.class); // <4>
+
+    SidedMarketDataCombiner combiner = new SidedMarketDataCombiner(mdWriter); //<5>
+
+    reader = upQueue.createTailer().methodReader(combiner); // <6>
+    System.out.println("up-q " + upQueuePath);
+}
+
+@TearDown
+public void tearDown() {
+    upQueue.close();
+    downQueue.close();
+    IOTools.shallowDeleteDirWithFiles(upQueuePath);
+    IOTools.shallowDeleteDirWithFiles(downQueuePath);
+}
+
+@Benchmark
+public void benchmarkComponents() {
+    switch (counter++ & 3) {
+        case 0:
+            smdWriter.onSidedPrice(sidedPrice.init("EURUSD", 123456789000L, Side.Sell, 1.1172, 1e6));
+            break;
+        case 1:
+            smdWriter.onSidedPrice(sidedPrice.init("EURUSD", 123456789100L, Side.Buy, 1.1160, 1e6));
+            break;
+        case 2:
+            smdWriter.onSidedPrice(sidedPrice.init("EURUSD", 123456789000L, Side.Sell, 1.1172, 2e6));
+            break;
+        case 3:
+            smdWriter.onSidedPrice(sidedPrice.init("EURUSD", 123456789100L, Side.Buy, 1.1160, 2e6));
+            break;
+    }
+    assertTrue(reader.readOne()); // <7>
+}
+----
+<1> Create an upstream queue.
+<2> Create a proxy which writes all methods calls to the upstream queue.
+<3> Create a downstream queue.
+<4> Create a proxy for the downstream queue.
+<5> Create the component which will write all outputs to the downstream queue.
+<6> Create a reader for the upstream queue which will call the combiner.
+<7> After writing a message to the queue, read it and call the appropriate method in the component.
+
+The first portion sets up and tears down the test.  The actual benchmark injects a message which when read and processed will trigger an output message.
+
+.Running the tests in JMH
+----
+  Percentiles, us/op:
+      p(0.0000) =      2.552 us/op
+     p(50.0000) =      2.796 us/op
+     p(90.0000) =      5.600 us/op
+     p(95.0000) =      5.720 us/op
+     p(99.0000) =      8.496 us/op # <1>
+     p(99.9000) =     15.232 us/op # <1>
+     p(99.9900) =     19.977 us/op # <2>
+     p(99.9990) =    422.475 us/op
+     p(99.9999) =    438.784 us/op
+    p(100.0000) =    438.784 us/op
+----
+<1> Critical latency threashold for many systems.
+<2> Can still be important in some systems.
+
+This is running on my development machine (Ubuntu 15.04, two E5-2650 v2, 128 GB memory).  For better results, I suggest the latest Haswell or Skylake and Centos.  The exact timing of this benchmark isn't important as the number and type of fields in the message is also a significant factor.  What is particularly interesting to me is the 99.9%tile latency (worst 1 in 1000) which is consistently under 20 mciro-seconds in this example.  This demonstrates both high performance and consistently fast latencies.
+
+=== Looking at how JMH is called.
+
+To control how JMH is run the following parameters were used:
+
+[source, java]
+----
+int time = Boolean.getBoolean("longTest") ? 30 : 3;
+System.out.println("measurementTime: " + time + " secs");
+Options opt = new OptionsBuilder()
+        .include(ComponentsBenchmark.class.getSimpleName())
+        .warmupIterations(8)
+        .forks(1)
+        .mode(Mode.SampleTime) // <1>
+        .measurementTime(TimeValue.seconds(time))
+        .timeUnit(TimeUnit.MICROSECONDS)
+        .build();
+
+new Runner(opt).run();
+----
+<1> `SampleTime` mode to test latencies rather than throughput.
+
+However, I have had trouble profiling and debugging JMH benchmarks so I change the way the test is run depending on how it is started:
+
+.Running in Flight Recorder and Debug
+[source, java]
+----
+if (Jvm.isFlightRecorder()) {
+    // -verbose:gc -XX:+UnlockCommercialFeatures -XX:+FlightRecorder 
+    // -XX:StartFlightRecording=dumponexit=true,filename=myrecording.jfr,settings=profile 
+    // -XX:+UnlockDiagnosticVMOptions -XX:+DebugNonSafepoints <2>
+    System.out.println("Detected Flight Recorder");
+    main.setup();
+    long start = System.currentTimeMillis();
+    while (start + 60e3 > System.currentTimeMillis()) { // <1>
+        for (int i = 0; i < 1000; i++)
+            main.benchmarkComponents();
+    }
+    main.tearDown();
+
+} else if (Jvm.isDebug()) {
+    for (int i = 0; i < 10; i++) {
+        runAll(main, Setup.class);
+        runAll(main, Benchmark.class);
+        runAll(main, TearDown.class);
+    }
+----
+<1> Run for 1 minute before shutting down.
+<2> Enable profiling between safepoints.
+
+=== In our next part
+
+https://vanilla-java.github.io/2016/03/29/Microservices-in-the-Chronicle-world-Part-4.html[Part 4: How can we time just the component running in another thread]. In particular see how long it takes to read, process and write each message with individual timings.
+
+== Glossary
+
+*Latency*- The time an individual operation takes. http://www.webopedia.com/TERM/L/latency.html["Together, latency and bandwidth define the speed and capacity of a network."]footnote:[Webopedia.com. (2016). What is Latency? Webopedia Definition. Online. Available at: http://www.webopedia.com/TERM/L/latency.html. Accessed Jul. 2016]
+
+*Serialization*- https://en.wikipedia.org/wiki/Serialization["The process of translating data structures or object state into a format that can be stored"]footnote:[Wikipedia. (2016). Serialization. Online. Available at: https://en.wikipedia.org/wiki/Serialization. Accessed Jul. 2016.]_See also_ *Serialization libraries*- The process that translates data into a format that can be consumed by another system.
+
+*Throughput*- The rate of data or messages transferred which is processed in a certain amount of time. This rate is written in terms of throughput, e.g a road could have a throughput of 10 cars per minute.

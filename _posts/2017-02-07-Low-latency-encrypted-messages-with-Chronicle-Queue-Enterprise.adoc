@@ -1,0 +1,27 @@
+= Low latency encrypted messages with Chronicle Queue Enterprise
+Peter Lawrey
+:hp-tags: Chronicle Queue
+
+Chronicle Queue Enterprise supports replication in a cluser and system monitoring. We recently added encrypted messages and the inital results are encouraging.
+
+=== What did we test?
+
+This test s similar to our previous non-encrypted version: https://vanilla-java.github.io/2017/02/06/Improving-percentile-latencies-in-Chronicle-Queue.html[Latency tests with Chronicle Queue], except we added Salted AES 128 encryption.  We chose AES as a fast encryption, and we added salting to make it harder to obtain the key
+
+=== Why use Salting?
+
+Most messages start with the same bytes. Whether the message is XML, JSON, FIX, Java Serialization, the first few bytes are predictable.  The start of every encrypted message can end up the same. This makes brute force cracking of the key easier because you know what you are looking for.
+
+To avoid this we add a 64 bit random number to the start of every message using SecureRandom, which makes brute force attack harder.
+
+=== The results.
+
+In short the 99%ile latencies were great, the 99.9%ile latencies were also good if you ignore co-ordinated omission as a problem. Unfortunately, with co-ordinated omission correction, the 99.9%ile numbers need to be improved.
+
+image::AES128-latency.png[]
+
+Nevertheless, the early results look good.  We can achieve throughputs of 400K/s and still get latencies around 2 micro-seconds 99% of the time. In addition, at 1.1 million messages per second we can get around 10 microseconds, 99% of the time.
+
+=== Conclusion
+
+Using encryption is slower, however it might still be fast enough for your needs.

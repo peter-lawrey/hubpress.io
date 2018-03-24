@@ -1,0 +1,155 @@
+= Distributing Common Java APIs
+:hp-tags: Microservices, Data Containers
+
+=== Distributing data stores vs Private data stores in Microservices
+Distributing data containers e.g. Maps, can be a way of avoiding having to think too much about distributing your application.  Your business logic is much the same, and it is your data collections which are visible to all your services.
+
+Using centralised or even distributed data stores have a number of scalability issues, as it requires every low level data access to be distributed in a generic way which isn't optimised for particular business requirements.  
+
+Distributing business components with private data stores is the favoured approach of Microservices and it limits the "surface area" of each service which reduces security issues, performance considerations and gives you more freedom for independant changes to service's data structures.
+
+In this review, I will be focusing on distributed data containers, largely because the interfaces are available in the JDK and available for everyone to look at.  I expect the conclusions drawn here are broadly similar for Business focused APIs, though each business component will vary.
+
+=== Review of different interaction types for common Data store APIs in the JDK.
+
+I have reviewed a number of APIs in the JDK using a https://github.com/OpenHFT/Chronicle-Essence/tree/master/src/main/java/net/openhft/chronicle/essence/classify[tool available here]
+
+The interfaces reviewed were:
+
+- ScheduledExecutorService (incl ExecutorService)
+- ReadWriteLock
+- Lock
+- BlockingDeque (incl BlockingQueue)
+- List (incl Collection)
+- ConcurrentNavigableMap (Incl SortedMap)
+- ConcurrentMap (incl Map)
+- NavigableSet (incl SortedSet, Set)
+
+Interfaces higher up the inheritance tree where not included to avoid duplication. However there is still some duplication e.g. Set and List are Collection(s).
+
+https://vanilla-java.github.io/2016/05/17/Modelling-Microservice-Patterns-in-Code.html#Request-Response[Request-Response] - 104 methods
+
+https://vanilla-java.github.io/2016/05/17/Modelling-Microservice-Patterns-in-Code.html#Request-Proxy[Request-Proxy] - 29 methods
+
+https://vanilla-java.github.io/2016/05/17/Modelling-Microservice-Patterns-in-Code.html#Request-Visitor[Request-Visitor] - 26 methods
+
+https://vanilla-java.github.io/2016/05/16/Simple-Asynchronous-Microservices-using-Lambda-Architecture.html[Asynchronous Lambda] - 18 methods
+
+ - 7 methods
+
+Default Call - 22 methods
+
+NOTE: "Default Call" means the default implimentation of the interface is appropriate an can be executed on the caller.
+
+NOTE: https://vanilla-java.github.io/2016/05/17/Modelling-Microservice-Patterns-in-Code.html#Request-Visitor[Request-Visitor] is variation on Request-Repsonse but rather than passing a Data Transfer Object, a Command Object is passed.
+
+NOTE: https://vanilla-java.github.io/2016/05/17/Modelling-Microservice-Patterns-in-Code.html#Request-Callback[Request-Callback] is a variation of Request Subscription where you expect to get exactly one invocation. There where no examples here.
+
+As I have noted in the past, while I believe using Lambda style asynchronous calls is ideal, this is not a natural interaction for many APIs and wouldn't work so well in these methods.
+
+Lastly, the https://vanilla-java.github.io/2016/05/17/Modelling-Microservice-Patterns-in-Code.html#Client-Injected-Handler[Client Injected Handler] might only make sense for a distributed component, and I wouldn't expect it to occur in an API which wasn't designed to utilise it.
+
+.Request-Response examples
+[source, Java]
+----
+// from Map
+V get(Object key);
+
+// from NavigableMap
+V lastEntry();
+
+// from Lock
+boolean tryLock();
+----
+
+.Request-Proxy examples
+[source, Java]
+----
+// from ReadWriteLock
+Lock readLock()
+
+// from Lock
+Condition newCondition();
+
+// from ConcurrentNavigableMap
+NavigableSet<K> descendingKeySet();
+
+// from ScheduledExecutorService
+ScheduledFuture scheduleAtFixedRate(Runnable run, long delay, long period, TimeUnit timeUnit)
+----
+
+.Request-Visitor examples
+[source, Java]
+----
+// from List
+Collection removeIf(Predicate test);
+
+// from ConcurrentMap
+V ConcurrentMap.computeIfPresent(K key, BiFunction mergeFunction);
+----
+
+.Asynchronous Lambda examples
+[source, Java]
+----
+// from BlockingDeque
+void addFirst(E element);
+
+// from Executor
+void execute(Runnable runnable);
+
+// from List
+void replaceAll(UnaryOperator oper); // also a Visitor
+----
+
+.Default Call examples
+[source, Java]
+----
+// from ConcurrentMap
+default V getOrDefault(Object key, V defaultValue) {
+    V v;
+    return ((v = get(key)) != null) ? v : defaultValue;
+}
+
+// from BlockingDeque
+Stream<E> parallelStream(); // <1>
+----
+<1> later the paralellStream itself could have it's work distributed across a grid of machines.
+
+=== Conclusion
+
+The Request-Response call is the most often used in this example.  While you can avoid using it in a  distributed system, there is often cases where using Request-Response is just simpler e.g. for control functions which don't have to scale as much as events which occur thousands of times a second.
+
+The Request Proxy and Asynchronous Lambda calls have some natural use cases and have been around for some time.
+
+The Request Visitor use cases where all added in Java 8 with the inclusion of Lambdas.
+
+In some cases, a default method on the client might be enough.  This will usually call through to a method which does have to go across the transport. Ideally this should result in just one method call.  If a default method has more than one method call it might be more efficient to execute this on the server.
+
+The Request Callback wasn't use in these cases, but it can be an effective way to transform a Request-Response call into an asynchronous call, although it requires an API change. 
+
+
+==== Footnote on Request-Callback
+
+What I have done in the past is make Request-Callback interchangeable with Request-Response where the Callback is added as the last argument.  This could be kept visible only to the client, and the server doesn't need to know. e.g.
+
+.Request-Callback examples calling Request-Response
+[source, Java]
+----
+// from Map
+default void get(Object key, ThrowableConsumer<V> consumer) {
+    V v;
+    try {
+        v = get(key);
+    } catch (Throwable t) {
+        consumer.onException(t);
+        return;
+    }
+    consumer.accept(v);
+}
+----
+
+
+
+
+
+

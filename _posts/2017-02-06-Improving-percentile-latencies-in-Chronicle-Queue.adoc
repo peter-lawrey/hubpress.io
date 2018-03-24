@@ -1,0 +1,109 @@
+= Improving percentile latencies in Chronicle Queue
+Peter Lawrey
+:hp-tags: Chronicle Queue, Low Latency
+
+Compared to a year ago, we have significantly improved the throughput at which we can achieve the 99%ile (worst one in 100).  
+What tools and tricks did we use to achieve that?
+
+=== What are we testing?
+
+Chronicle Queue appends messages to a file while another thread or process can be reading it.  This gives you persisted IPC (InterProcess Communication). 
+
+For our clients with higher expectations for latency, they are looking to have the whole service which is under 100 micro-seconds 99% of the time.
+
+For our test, we have chosen to find the throughput you can achieve and still be under 10 micro-seconds 99% of the time. The test writes 20 million 40 bytes messages, which contains the time the message should have been sent to avoid co-ordinated omission, and read by another thread. The difference in time is recorded.
+
+We have also added encryption support for our enterprise solution. We test here a salted AES 128-bit encryption.
+
+=== The improvement
+
+|====
+| Test | Throughput where 99%ile is 10 microseconds
+| March 2016, unencrypted +
+Centos 7 server | &nbsp;&nbsp;&nbsp;100 K/s
+| February 2017, encrypted +
+Centos 7 server | &nbsp;&nbsp;&nbsp;700 K/s
+| February 2017, unencrypted +
+Windows 10 Laptop | 1,200 K/s
+| February 2017, unencrypted +
+Centos 7 server | 2,400 K/s
+|====
+
+What makes this improvement significant, is that we added correction for co-ordinated omission.
+
+=== Sampling tool
+
+While profilers are very useful, one thing they struggle with is helping you find the cause of latency outliers.  This is because profilers show you averages, and unless your outliers are really large, they don't show up as significant.
+
+To address this we added a class which acts as a basic stack sampler.
+
+[source, java]
+----
+package net.openhft.chronicle.core.threads;
+
+import java.util.concurrent.locks.LockSupport;
+
+/**
+ * Created by peter on 04/02/17.
+ */
+public class StackSampler {
+    private final Thread sampler;
+    private volatile Thread thread = null;
+    private volatile StackTraceElement[] stack = null;
+
+    public StackSampler() {
+        sampler = new Thread(this::sampling, "Thread sampler");
+        sampler.setDaemon(true);
+        sampler.start();
+    }
+
+    void sampling() {
+        while (!Thread.currentThread().isInterrupted()) {
+            Thread t = thread;
+            if (t != null) {
+                StackTraceElement[] stack0 = t.getStackTrace();
+                if (thread == t)
+                    stack = stack0;
+            }
+            LockSupport.parkNanos(10_000);
+        }
+    }
+
+    public void stop() {
+        sampler.interrupt();
+    }
+
+    public void thread(Thread thread) {
+        this.thread = thread;
+    }
+
+    public StackTraceElement[] getAndReset() {
+        StackTraceElement[] stack = this.stack;
+        thread = null;
+        this.stack = null;
+        return stack;
+    }
+}
+----
+
+We can accumulate the results in a `Map<String, Integer>` which is nothing special. Except we can filter only those which contributed to an outlier e.g. a delay of over 10 microseconds.
+
+The results are pretty crude, however we found issues in code that the profile didn't show.  The issue which came up again and again was `default` methods. As of Java 8 update 121, they just don't seem to be optimised as well as methods in classes. We found that copying the default method to selected classes and only for the selected methods in this sampler, we saw a reduction in outliers which allowed us to increase the throughput further.
+
+There were other optimisations more specific to our problem, but using class methods instead of default methods is a trick we have used before.
+
+NOTE: Not all default methods are bad, we still use them often without a problem. Only override a default method for performance if you can show this helps.
+
+=== Charting the 99%ile latency.
+
+For the unencrypted messages we achieve reasonable (less than 10 micro-seconds) latencies in the 99.9%ile up to 1.4 million messages per second and in the 99%ile up to 2.3 million per second.
+
+image::https://github.com/Vanilla-Java/vanilla-java.github.io/blob/master/images/latency-for-throughput.png?raw=true[]
+
+=== Conclusion
+
+It is possible to have low latency encrypted messages where the 99%ile is less than 10 microseconds, however we need to have a throughput of less than 700K messages per second (or use multiple threads / queues).
+
+While minimising the latency of outliers is tricky, reducing the 99%ile latency can improve the consistency dramatically and increase the throughput you can safely sustain.
+
+

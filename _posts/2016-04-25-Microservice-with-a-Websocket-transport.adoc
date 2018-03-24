@@ -1,0 +1,25 @@
+= Microservice with a Websocket transport
+:hp-tags: Microservices, Websockets
+
+In this post, we will look at a simple component to publish market data and accept orders.  How can this be accessed using websockets as a transport?
+
+=== Our service
+
+.Interface for messages from the client to the server
+[source, java]
+----
+public interface GUIGateway {
+    void enableMarketData(boolean enabled);
+    void newOrder(Order order);
+}
+----
+
+.Interface for messages from the server to the client
+[source, java]
+----
+public interface GUIGatewayListener {
+    void market(MarketData marketData);    
+    void order(OrderStatus orderStatus);
+}
+----
+

@@ -1,0 +1,52 @@
+= Simple Asynchronous Microservices using Lambda Architecture.
+Peter Lawrey
+:hp-tags: Microservices, Lambda Architecture
+
+=== Lambda Architecture
+
+Lambda Architecture is a simple, powerful, though limited example of a Microservice. As it is so simple, you want to use it as much as possible, to expose the more complex services/component in your system which cannot support this interaction model.
+
+> https://en.wikipedia.org/wiki/Lambda_architecture[Lambda Architecture] depends on a data model with an append-only, immutable data source that serves as a system of record. It is intended for ingesting and processing timestamped events that are appended to existing events rather than overwriting them. State is determined from the natural time-based ordering of the data.
+
+=== A translation function
+
+The microservice takes messages in and produces messages out. It's input is an append only data structure, and the function has no state of it's own which is not derived from it's inputs.
+
+image::Lambda-Architecture.jpg[]
+
+This simple translator is useful for taking messages from external systems and normalising those messages into an internal format.  Conversely, you can convert messages from an internal message format to an external format.
+
+=== Working with history
+
+Notionally, all the messages to date form an input of the function.  Replaying every message on every new message is too expensive.  You can instead cache key information derived from those messages to provide a real time solution.
+
+image::Lambda-Architecture-With-State.jpg[]
+
+This is a variation on the standard function where state is retained based on it's inputs.  Provided this is only an optimisation, rather than a change in behaviour, this is still a function. i.e. a function of all the messages, rather than just one message.
+
+Having a function with private state gives it memory and makes it practical for more complex operations such as control (permissioning, turning functionality on and off), matching of messages over time (e.g. order matching)
+
+=== Putting these together
+
+By having translators for messages in and out, as well as a central control system, you can build a more complex processing system.
+
+image::Lambda-Architecture-Services-Chained.jpg[]
+
+The functionality here should form your critical path.  You want a simple message to be able to pass from one end of your system to the other in the shortest time possible.  In Java this can mean as low as 10 micro-seconds 99% of the time. As well as being fast it is simple to test each function independently, as well as test this without transports for ease of debugging.
+
+=== Non-critcial path functions.
+
+Not everything can or should be on the critical path.  There will be operations which either use a lot of CPU, or need to obtain data from external systems such as databases.  You need a way to interact with these systems without impacting the critcial path. Using feedback is a simple way to achieve this.
+
+image::Lambda-Architecture-Services-Feedback.jpg[]
+
+In this diagram, the slower functions are CPU bound strategies, but you could have components which obtain data from a database for example, without slowing the critical path.
+
+=== Reading more
+
+You can read my earlier posts on how to implement these Lambda Architecture components in Java and easily test them. https://vanilla-java.github.io/2016/03/22/Micro-services-for-performance.html[Micro services for Performance] as well has how you can implement a simple service to asynchronously access a JDBC database https://vanilla-java.github.io/2016/04/12/A-J-D-B-C-Gateway-Microservice.html[A JDBC Gateway Microservice]
+
+For low latency, high throughput persistence we recommend using http://chronicle.software/products/chronicle-queue/[Chronicle Queue] which is Apache 2.0 open source project available at https://github.com/OpenHFT/Chronicle-Queue and on http://search.maven.org/#search%7Cga%7C1%7Cchronicle%20queue[Maven Central]
+
+
+

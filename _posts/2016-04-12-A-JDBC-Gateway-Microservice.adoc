@@ -1,0 +1,162 @@
+= A JDBC Gateway Microservice
+Peter Lawrey
+:hp-tags: Microservices, JDBC, Example
+
+=== A deep dive into a low latency microservice
+
+We look at a microservice which can run in it's own JVM, can perform JDBC updates and queries via a persistent queue for in bound request and a queue for results.
+
+In previous posts I looked at the theory behind there low latency micro-services so lets have a look at a micro-service which can do something useful.
+
+I would consider this a Gateway Service as it interacts with a system which is outside the microservice model.
+
+=== What does this service do?
+
+The service supports two messages `executeQuery` and `executeUpdate`.  These methods mirror the same methods for `PreparedStatement` except the results are passed as messages
+
+.Two asynchronous messages in
+[source, java]
+----
+public interface JDBCStatement {
+    void executeQuery(String query, Class<? extends Marshallable> resultType, Object... args);
+
+    void executeUpdate(String query, Object... args);
+}
+----
+
+.Two asynchronous results, possibly with an Exception thrown
+[source, java]
+----
+public interface JDBCResult {
+    void queryResult(Iterator<Marshallable> marshallableList, String query, Object... args);
+    void queryThrown(Throwable t, String query, Object... args);
+
+    void updateResult(long count, String update, Object... args);
+    void updateThrown(Throwable t, String update, Object... args);
+}
+----
+
+=== Component wrapped as a Service
+
+As in previous posts, we create a component which can be executed without a transport.  This can be unit tested stand alone, or with a series of components without the transport complicating testing and debugging.
+
+.Looking at the executorUpdate method
+[source, java]
+----
+public class JDBCComponent implements JDBCStatement {
+    private final Connection connection;
+    private final JDBCResult result;
+
+    public JDBCComponent(ThrowingSupplier<Connection, SQLException> connectionSupplier, JDBCResult result) throws SQLException {
+        connection = connectionSupplier.get();
+        this.result = result;
+    }
+
+    @Override
+    public void executeUpdate(String query, Object... args) {
+        try (PreparedStatement ps = connection.prepareStatement(query)) {
+            for (int i = 0; i < args.length; i++)
+                ps.setObject(i + 1, args[i]);
+            int count = ps.executeUpdate();
+            // record the count.
+            result.updateResult(count, query, args);
+        } catch (Throwable t) {
+            result.updateThrown(t, query, args);
+        }
+    }
+----
+
+You can see that every input message creates an output message with the results.  This will be useful later for restarting the service from where it got up to and monitoring it's progress, as well as obtaining the results.
+
+.How to wrap this as a service
+[source, java]
+----
+public class JDBCService implements Closeable {
+    private static final Logger LOGGER = LoggerFactory.getLogger(JDBCService.class);
+    private final ChronicleQueue in;
+    private final ChronicleQueue out;
+    private final ExecutorService service;
+    private final ThrowingSupplier<Connection, SQLException> connectionSupplier;
+    private volatile boolean closed = false;
+
+    public JDBCService(ChronicleQueue in, ChronicleQueue out, ThrowingSupplier<Connection, SQLException> connectionSupplier) throws SQLException {
+        this.in = in;
+        this.out = out;
+        this.connectionSupplier = connectionSupplier;
+        
+        service = Executors.newSingleThreadExecutor(
+                new NamedThreadFactory(in.file().getName() + "-JDBCService", true)); // <1>
+        service.execute(this::runLoop); // <2>
+        service.shutdown(); // stop when the task exits.
+    }
+    
+
+    void runLoop() {
+        try {
+            JDBCResult result = out.createAppender() <3>
+                    .methodWriterBuilder(JDBCResult.class)
+                    .recordHistory(true)
+                    .get();
+            JDBCComponent js = new JDBCComponent(connectionSupplier, result);
+            MethodReader reader = in.createTailer().afterLastWritten(out).methodReader(js); // <4>
+            Pauser pauser = new LongPauser(50, 200, 1, 10, TimeUnit.MILLISECONDS);
+            while (!closed) {
+                if (reader.readOne()) // <5>
+                    pauser.reset();
+                else
+                    pauser.pause();
+            }
+        } catch (Throwable t) {
+            LOGGER.error("Run loop exited", t);
+        }
+    }
+
+    @Override
+    public void close() {
+        closed = true;
+    }
+
+    public JDBCStatement createWriter() {
+        return in.createAppender() // <6>
+                .methodWriterBuilder(JDBCStatement.class)
+                .recordHistory(true)
+                .get();
+    }
+    
+    public MethodReader createReader(JDBCResult result) {
+        return out.createTailer().methodReader(result);
+    }
+}
+----
+<1> Create a thread with a meaningful name. We use an ExecutorService in case we want to do something more complex with it later.
+<2> Add this task to the pool
+<3> Create a proxy to write to the output queue
+<4> Start reading after the last message to be successfully processed.
+<5> Read one message at a time.
+<6> Add a helper method to create a writer to the input of this service
+<7> Add a helper method to read the results of this service.
+
+=== How does it perform?
+
+I tested this writing to HSQLDB which is pretty fast, even writing to a file. Even so, using it as a Service could be useful for very bursty activity as we can handle much higher rates for periods of time.
+
+The performance test writes 200K messages as fast as possible and waits for the to all complete.  The first timing is the average latency to write each request, and the second latency is the average time to receive the result.
+
+----
+Average time to write each update 1.5 us, average time to perform each update 29.7 us
+----
+
+
+While HSQLDB was able to sustain over 33 K updates per second, (1 / 29.7 us), the service wrapping could handle bursts of over 660K writes per second. (1 / 1.5 us)  This represents a 20 fold improvement in the burst throughput it can support.
+
+=== How long can a burst be?
+
+Both Linux and Windows tend to perform well up to 10% of main memory being "dirty" or not written to disk. For example, if you have 256 GB, you can have 25 GB of "dirty" data.  Even so, if the burst rate is faster than the consuming service, but slow enough that the disk subsystem can keep up, your bursts can exceed main memory size.  To put that in context, if your messages are 256 bytes long, the service could be behind by more than one billion messages, and it will not run out of memory, or fail.  The main limitation in this case, is the amount of free disk space you have.  At the time of posting you can buy 1 TB of Enterprise SSD for less than $600, and Samsung is selling 16 TB SSD drives. I expect  storage costs will continue to fall.
+
+=== Conclusion
+
+Building a microservice by wrapping a component with an asynchronous API with a transport for messaging in and out has worked without too much complexity.
+
+The best way to go fast is to do less work.
+
+

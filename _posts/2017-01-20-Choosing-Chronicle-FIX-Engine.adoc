@@ -1,0 +1,143 @@
+= Choosing Chronicle FIX Engine
+Peter Lawrey
+:hp-tags: Chronicle FIX, FAQ
+
+== Overview
+
+The FIX Trading Community web site has posted a http://www.fixtradingcommunity.org/pg/structure/tech-specs/implementation-guide/choosing-a-fix-engine[list of common questions about FIX Engines]. This page brings together our answers for these questions.
+
+For more details on http://chronicle.software/products/chronicle-fix/[Chronicle FIX]
+
+=== Capabilities/throughput
+
+Chronicle FIX supports;
+
+- 100,000 messages per second per core. (NewOrderSingle / ExecutionReport sized messages)
+- FIX Services which need to have a 30 micro-seconds tick to trade.
+- FIX 4.0, 4.1, 4.2, 4.3, 4.4, 5.0, 5.0 sp 1, 5.0 sp2, FIXT 1.1 is planned.
+- failover of a FIX server to a hot spare via replication
+- encryption of all message logged and replicated.
+- zero copy between the FIX message and your data model. An intermediate data model is provided for convenience but is not required.
+- designed for ultra low GC systems (minor GC less than once a day)
+
+=== Technologies used
+
+- Core Java 8.
+- Build on largely Open Source libraries, also from Chronicle.
+- YAML for configuration.
+- QuickFIX style XML Schema files.
+- Source on GitHub.
+
+=== Support and services offered
+
+Chonicle Software offers Silver support (long London day, 5 days a week) and Gold support (24/7)
+
+=== Versions supported
+
+Q: Does the engine support all current FIX versions +
+A: FIX 4.0, 4.1, 4.2, 4.3, 4.4, 5.0, 5.0 sp 1, 5.0 sp2, FIXT 1.1 is planned.
+
+Q: Does it support all tags of each version +
+A: All tags for these version are supported.
+
+Q: Can it support more than one version at once +
+A: An Engine supports being an acceptor and an intiliator and each session can have a different FIX version and/or custom FIX schema.
+
+Q: What is involved in supporting new versions of FIX? +
+A: You start with an XML Schema to generate the code for that schema. You can customise the behaviour further in plugin code. You could add a version of FIX which which we don't have on our supported list.
+
+=== Support for asset classes other than equities	
+
+Q: Can the engine support fixed income, derivatives, FX etc. +
+A: We support all the standard messages/field/components, for any asset class.
+
+Q: What is involved in adding support for additional products? +
+A: The level of support you need is orthogonal to the products you want. If you have Gold SUpport that covers the open source products and any licensed products. You can have Gold Support for the open source products alone.
+
+=== High availability, load balancing, and scalability
+
+Q: Does the FIX engine support a software-based high availability option for high-volume, many-connection implementations +
+A: We support failover to a hot spare using replication. When a message is published we can choose to wait for the message to be replicated/acknowledge before sending it to ensure it isn't lost. We don't offer a load balancing facility at the moment, however one dual socket server can comfortably handle one million messages per second.
+
+=== Speed and robustness	
+Q: How many messages a second can the engine process +
+A: Chronicle FIX can comfortably handle 100,000 messages per second per core and one million message per second per server.
+
+Q: What fall-back and redundancy options are available +
+A: You can set a hot spare using Chronicle Queue Entperise to provide replication of the logs.
+
+=== Encryption options	
+
+Q: Does the engine support common encryption methodologies, Is SSL supported +
+A: Not currently, but this could be added if you need it.
+
+=== Ability to implement per-connection business logic	
+
+Q: Each FIX connection tends to be slightly different. Can you embed counterparty specific logic within the engine rather than having to implement from outside within your systems? +
+A: You can have per session
+
+- data model for storing messages
+- custom parser
+- message validation
+- message handling
+
+You can also share this logic to minimise the overhead of managing different providers. e.g. Youc an combine the custom schema of 20 providers into a single Uber schema even if they use different versions of FIX. This allows you to code to one aggregate data model.
+
+NOTE: It is assumed each session will have at most one connection.
+
+=== Platforms supported	
+
+Q: Not all FIX engines run on all platforms. Some FIX engines sell themselves on the basis that they will run on all platforms, others take the opposite view and market themselves on the basis that they are optimized to run on one platform only. +
+A: Chronicle FIX only supports Oracle Java 8, OpenJDK 8, Azul Zing/Zulu 8 on x64 processors. We support Linux, Windows and MacOSX.
+
+=== Architectural flexibility	
+
+Q: Does the engine restrict your implementation to a specific architecture +
+A: Realistically it has to be in Java.
+
+Q: Are you forced to use a database for persistence or a particular type of middleware for example +
+A: Your must data store must be accessible from Java.
+
+=== Provided as a set of class libraries or a FIX-in-a-box solution	
+
+While we offer a set of class libraries you could customise heavily (we use the same libraries to implement our non FIX Engine) most clients use it as FIX-in-a-box.  We feel the like the fact they could take it apart and build it however they need covers potential technical risks.
+
+Q: FIX engines supplied as class libraries (APIs) offer complete flexibility over your implementation but you have to do the work. +
+A: We want to offer complete flexability even if you won't use a fraction of the flexability. As the product matures we want to reduce the amount of work you need to do, but teher will always be some customisation you will need to do to suit your soluton.
+
+Q: FIX-in-a-box solutions provide ready-made functionality for many commonly used activities and seamlessly handle network connectivity. They are easier to implement but aren't so flexible. +
+A: We attempt to handle all the session messages and details automatically from configuration. You should only have to worry about the application messages most of the time. We support custom session messages as well.
+
+=== Access to source code	
+
+Q: Some FIX engine vendors make available the source-code so that you can modify their product. Typically this is only done for a fee and for the largest clients. +
+A: Our FIX engine is in a closed source repository on GitHub.  Once you have a license and have access you can fork the code, issue Pull Request and add issue just as you can on GitHub. Out support agreements includes some days a month for bespoke development so you can get us to make the changes if you prefer.
+
+=== Support offered	
+
+Q: What level of support is offered and at what times. +
+A: Silver support is a long London day, 5 days a week. Gold is 24/7 and ...
+
+Q: Is on-site support available +
+A: Platnium support includes three months a year on site on days of your choice.
+
+=== Upgrades and updates	
+
+Q: How many updates and upgrades does your license entitle you to +
+A: The perpetual license alone entitles you to updates/upgrades for 120 days. If you get support it includes updates for the period under support.
+
+Q: Does the vendor charge a license fee for an engine in a disaster recovery / stand-by environment +
+A: How you use the product doesn't affect the price.
+
+=== Cost and pricing options	
+
+Q: Is the cost reasonable? Is the vendor flexible around how you would like to pay? +
+A: We can be flexable for smaller clients. To date we have only had real interest and sales for business unit license covering a development team.
+
+=== Monitoring tools	
+Q: Does the engine come with tools that allow monitoring of your FIX sessions. A good error translator can prevent you spending of a great deal of time trying to find an error message. +
+A: We have a HTML5 GUI for monitoring sessions and querying logs of messages.
+
+
+
+

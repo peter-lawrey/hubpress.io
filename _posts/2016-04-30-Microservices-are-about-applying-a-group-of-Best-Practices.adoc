@@ -1,0 +1,121 @@
+= Microservices are about applying a group of Best Practices
+:hp-tags: Microservices, Best Practice
+
+=== Microservices Denial
+
+A number of times clients have said; they can't imagine their organisation using Microservices.
+I found this surprising as I know those people are using many of the principles of Microservices already.
+
+I can understand that they feel no need to join the hype around microservices, but the reality is, like it or not, 
+you are most likely using some of the best practices Microservices advocates.
+
+Stages of denial
+
+ - It all seems like hype, we don't go in for that.
+ - Perhaps not all hype, but does it really mean anything.
+ - It all sounds pretty familiar.
+ - It sounds like what we are doing already.
+ 
+Formally or informally, most likely you have been following some best practices already.
+
+=== Adopting Best Practices.
+
+Perhaps you don't like the name Microservices, and perhaps not all the different things people 
+associate with Microservices are right for your team, your projects.  Instead lets consider how do you formalise what you are trying to achieve and finding a clearer path to adopting best practices.
+
+==== Why do this at all?
+
+Within larger teams there can be some disagreement as to how to proceed.  There can be strong feelings on what is bad, or broken about what you have and the temptation is to just throw away large portions of what you have or throw away everything.
+
+The problem with doing this is you risk taking out the old known problems and putting in more new unknown ones.  You need to make changes, possibly selectively radical changes, which are manageable and achieveable for your team.
+
+By formalising what you are talking about, even using buzz words, you can state more clearly what you are trying to achieve and why.  It gives you a common language in which to communicate your ideas.  It can give you a better perspective of where you are today and where you need to be.
+
+=== Best Practices Scorecard.
+
+Using a scorecard you can quickly see where you are today, where the quick wins are and where you need to be in the medium term.  A big part of the question; where are we today, is just rebranding what you have already.  This review can lead you to see in some ways you are not in as bad position as you might have imagined, while putting in to stark contrast the areas with the most opportunity to improve.
+
+==== Initial steps
+
+The initial steps I suggest are
+
+- rebrand what you have; you will have some best practices already.
+- quick wins; low risk changes could help improve your position.
+- medium term improvements; what do you need to achieve in the next six months.
+
+=== An example.
+
+This is a score card I put together for a senior manager for firm of over 60 developers. In the space of an hour we went from not considering Microservices, to being convinced it was a path to enhance their solutions.
+
+.Best Practice Scorecard
+[cols="3,1,1,1"]
+|===
+|  | Today | Quick Wins | 6 Months
+
+| Simple bsuiness component based design.
+| ★★
+| ★★☆
+| ★★☆
+
+| Distributed by JVM and Machine
+| ★★
+| ★★
+| ★★☆
+
+| Service Discovery
+| ★
+| ★☆
+| ★★
+
+| Resilience to failure
+| ★☆
+| ★☆
+| ★★
+
+| Transport agnostic
+| ★
+| ★☆
+| ★★
+
+| Asynchronous messaging.
+| ★☆
+| ★★
+| ★★
+
+| Automated, dynamic deployment of services.
+| ★☆
+| ★★
+| ★★☆
+
+| Service local private data sets.
+| ☆
+| ★
+| ★
+
+| Transparent messaging.
+| ☆
+| ★★
+| ★★☆
+
+| Lambda Architecture
+| ★
+| ★★
+| ★★★
+
+|===
+
+NOTE: This is not intended to be an exhaustive list. It is what we reviewed in the first hour.
+
+The last two areas were recognised as the most significant areas for improvement as they are both low risk but highly likely to reveal the cause of some of the recurring issues they have been having.
+
+In particular, performance and stability issues require quality, detailed information about what your system is doing so you can take an informed view as what needs to be changed to fix it.
+
+=== Conclusion
+
+Whether you love or loath Microservices, most likely you are using some Best Practices, and a review of the Best Practices used in Microservices may prove to be useful in seeing how you can improve what you have.
+
+==== Contact Us.
+
+http://chronicle.software/[Chronicle Software] provides one and two week workshop for starting new projects, training and consulting.  We provide http://chronicle.software/support/[Professional Support]. We sponsor open source software on github as well as a low latency FIX Engine and enterprise versions of a high performance http://chronicle.software/products/chronicle-queue/[Queue], a key value store http://chronicle.software/products/chronicle-map/[Map] and a data distributions http://chronicle.software/products/chronicle-engine/[Engine]
+
+You can email us on mailto:sales@chronicle.software[]

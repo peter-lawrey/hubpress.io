@@ -1,0 +1,50 @@
+= Light weight Microservices
+:hp-tags: Microservices, Architecture, Design principles
+
+=== What do we see as light weight Microservices?
+
+A key requirements for productivity is a short development lifecycle.  
+Every time you have to wait between changing code and knowing there is an error to be fixed, increases the cost of fixing that error. 
+You want fast feedback to ensure you stay productive.
+
+Another key requirement is simple components which are easy to reason about.  One of the simplest is services which follow the Lambda Architecture.
+ 
+==== Using your IDE as much as possible.
+
+You should be able to 
+
+ - see most errors in your IDE as you type, before you even compile your code.
+ - run your program using the Run button on your IDE.
+ - debug your program by running it in your IDE.
+ - profile your application from your IDE
+
+==== Run your application quickly on your desktop
+
+It is essential to be able to run your service entirely from your desktop.  This allows you to
+
+ - write repeatable unit tests for key components of your system.
+ - run your application using state which is local to you.
+ - work without contention on shared resources such as a shared development database.
+ - reproduce production issues from your development environment.
+ 
+==== Microservices which meets your business needs.
+
+The components which make up you microservices should be
+
+ - directly releated to a business requirement. If you couldn't explain to an end user/business representaive why the component is needed to fulfill what they need, it's not a business component.
+ - the transport fo messages between services should be a seperate concern and even optional. e.g. for unit tests and debugging.
+ - a microservice is not a browser, and how a browser talks to a web service is not the only model for how microservices can talk to each other.
+
+=== How to define components.
+
+When you define your components, it should be a direct reflection of the business function it performs.
+
+ - microservices should be coding in terms of top down design, sarting with *what* it needs to do at the highest level, calling methods which implement the *how* this is done. 
+ - transport considerations should be defined externally to the component.  The transport should not have any influence on the business requirements, and should be interchangeable.
+ 
+=== Lambda Architecture.
+
+Lambda Architecture (not the same as Lambdas in Java which are closures) provides a simple model for microservices to follow.  Not all microservices can follow the Lambda Architecture, however the more service which do follow it the easier your system will be to reason about.
+
+
+ 

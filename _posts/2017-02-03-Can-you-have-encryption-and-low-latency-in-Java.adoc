@@ -1,0 +1,29 @@
+=  Can you have encryption and low latency in Java
+Peter Lawrey
+
+While using encryption is slower than writing raw messages, how much slower is it and does it have to be a performance problem?
+
+In this post, I look at Chronicle Queue, with and without encryption to see how much difference it makes to latency.
+
+== The test
+
+In this test, there is one writer or Appender, writing data at regular intervals using a Marshallable object, containing a nano-second timestamp. Another reader or "Tailer" is reading those messages.
+The timestamp used is the time the message should have been written rather than when it was written to avoid co-ordinated omission.
+
+The message is 32 bytes in length, and 5 million messages were sent in each case after ignoring the first 100 thousand to allow the JVM to warmup.
+
+The computer used is a Dell XPS 15 with an i7-6700HQ with 8 GB memory running Windows 10.
+
+== Salted AES encryption.
+
+AES128 is a fast 128 bit encryption, though it has one weekness. If all the messages start the same (and in this test and is often the case) the first bytes become predictable.  This makes cracking the key easier.
+
+A standard soluton is to use a "salt", which is a random block at the start of the message. In our case we use a 64-bit psedo random number with the System.nanoTime() (also 64-bit)
+
+== The latency distribution
+
+In throughput tests, the machine can write/read over one million messages per second with encryption, however the latency distribution is poor in this range.  
+For the purposes of this test we are looking at what throughput do we get low latency as well .
+
+
+

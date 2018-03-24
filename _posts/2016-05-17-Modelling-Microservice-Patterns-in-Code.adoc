@@ -1,0 +1,361 @@
+= Modelling Microservice Patterns in Code
+Peter Lawrey
+:hp-tags: Microservices, Patterns, Java
+:published_at: 2016-05-17
+
+=== Service Interactions
+
+There is a number of simple interactions a service can support.  Which pattern is best for your application can depend on what an existing application expects, and what latency requirements you have.  Broadly speaking these interactions fall into client-server and peir-to-peir messaging.
+
+For peir-to-peir messaging, one approach to take is https://vanilla-java.github.io/2016/05/16/Simple-Asynchronous-Microservices-using-Lambda-Architecture.html[Lambda Architecture] however from supporting GUIs, client - server models can be easier to work with.
+
+I feel it is important to design components which could be tested and debugged together, as in a monolith, but can be deployed as multiple *right sized* services to different threads, JVMs, or machines.
+
+=== Client-Server Messaging
+
+Client-Server messaging is often used in a synchronous way.  Asynchronous messaging can support multiple concurrent requests, reducing the cost of network latency and increasing throughput. Asynchronous messaging can perform best when it is latency, rather than network bandwidth which is your limiting factor.
+
+==== Using a human readable protocol
+
+It is useful to be able to see the underlying messages in readable text.  I suggest using either text or a binary format which can be automatically converted to text to make it easy to  check the data sent. I suggest using YAML as the human readable format as;
+
+- it is designed to be human readable instead of a subset of another language/format.
+- it supports messages, types and comments.
+- it can be sent as binary for performance and converted to text as required
+
+A human readable format allows you to quickly determine whether it is the sender or receiver which is behaving incorrectly.  It can allow you to see and stop undesirable behaviour which doesn't show up in a test. e.g. are there too many heartbeats.
+
+[[Request-Response]]
+==== Request/Response
+
+The client sends a message to a server.  That message contains a message type to choose an action to perform on the server and usually includes a payload of data.  The response is usually just data.
+
+For every message the client sends the server, it response with a single message. Often the client waits for the response, however the client can process the response asynchronously to improve throughput.
+
+image::Request-Response.jpg[]
+
+With asynchronous response processing, the client can send multiple requests over the same channel rather than wait for each one to complete.
+
+.Synchronous server with synchronous client
+[source,java]
+----
+interface OneRequestResponse {
+    Response requestType(RequestData data);
+}
+----
+
+.Synchronous server with asynchronous client
+[source,java]
+----
+interface OneRequestResponse2 {
+    void requestType(RequestData data, Consumer<Response> responseConsumer);
+}
+----
+
+Using this API could be translated into YAML such as
+
+.Synchronous server with synchronous or asynchronous client
+[source,yaml]
+----
+# client sends to server
+---
+requestType: {
+  data: 1,
+  text: my text
+}
+
+# server sends to client
+---
+reply: !MyResponse {
+  moreData: 128,
+  message: Success
+}
+...
+----
+
+[[Request-Proxy]]
+==== Request/Proxy
+
+This is like request/response, except the object returned is a proxy for further events.  This is useful when the value returned represents a complex, or very large object.
+
+image::Request-Proxy.jpg[]
+
+This is used in Map returning a key set or values which is a proxy to the underlying map.
+
+.Method on java.util.Map
+[source,java]
+----
+public interface Map<K, V> {
+
+    Set<K> keySet();
+    
+    Set<Map.Entry<K, V>> entrySet();
+    
+    Collection<V> values();
+}
+----
+
+Using a proxy gives access to data without having to pass all the data from the server to the client.
+
+.Method on java.util.Map
+[source,yaml]
+----
+# client sends to server
+--- !!meta-data # binary
+csp: /map/my-map?view=map
+---
+keySet: []
+---
+entrySet: []
+---
+values: []
+
+# server sends to client
+---
+reply: !set-proxy {
+   csp: /map/my-map?view=keySet
+}
+---
+reply: !set-proxy {
+   csp: /map/my-map?view=entrySet
+}
+---
+reply: !set-proxy {
+   csp: /map/my-map?view=values
+}
+
+# client sends to server
+--- !!meta-data # binary
+csp: /map/my-map?view=keySet
+--- !data # binary
+size: []
+---
+
+# server sends to client
+---
+reply: 128000 # <1>
+
+# client sends to server
+--- !!meta-data # binary
+csp: /map/my-map?view=keySet
+--- !data # binary
+remove: "key-111"
+---
+
+# server sends to client
+---
+reply: true # <2>
+...
+----
+<1> no need to send 128,000 keys just to determine how many there was.
+<2> key was removed on the server, not a copy sent to the client.
+
+[[Request-Callback]]
+==== Request/Callback
+
+The client sends a message to a server.  That message contains information to call an action on the server and usually includes a payload of data.  The callback is also a message containing an action and data.
+
+This is like a Subscription except that exactly one event is expected to be returned.
+
+image::Request-Callback.jpg[]
+
+The use of a callback provides a richer interaction between the caller and callee.
+
+.Synchronous server with a callback
+[source,java]
+----
+interface OneCallback {
+    void resultOne(ResultOne result);
+
+    void resultTwo(List<ResultOne> results);
+
+    void errorResult(String message);
+}
+
+interface OneRequestCallback {
+    void requestType(RequestData data, OneCallback callback);
+}
+----
+
+The client could be configured to either wait for the server to call the callback, or handle the callback asynchronously.  The thread which performs the method in the callback will be on the client side.
+
+.Synchronous server with a callback
+[source,yaml]
+----
+# client sends to server
+---
+requestType: {
+  data: 1,
+  text: my text
+}
+
+# server sends to client
+---
+resultTwo: [
+  {
+      moreData: 128,
+      message: Success
+  },
+  {
+      moreData: 1111,
+      message: Failure
+  }  
+}
+...
+----
+
+[[Request-Visitor]]
+==== Request/Visitor
+
+The client sends one or two visitors to the server to apply to local objects or actors.  This visitor can be an update which applied atomically to an actor, and/or a vistor can be applied to retrieve specific information.
+
+image::Request-Visitor.jpg[]
+
+.Pass a function to apply on a server for a given key
+[source,java]
+----
+interface KeyedResources<V> {
+
+    void asyncUpdate(String key, Visitor<V> vistor);
+    
+    <R> R syncUpdate(String key, Visitor<V> updater, Function<V, R> returnFunction);
+    
+}
+----
+
+This approach allows the caller to apply an operation to an actor without needing to know where that actor is.
+
+.Pass a function to apply on a server for a given key
+[source,java]
+----
+# client sends to server
+---
+asyncUpdate: [ 
+    "key-5", 
+    !MyVisitor { add: 10 } 
+] 
+# no return value
+--- # subtract 3 and return x * x
+syncUpdate: [ 
+    "key-6", 
+    !MyVisiitor { add: -3 }, 
+    !Square { } 
+];
+
+# server sends to client
+---
+reply: 1024
+...
+----
+
+[[Request-Subscription]]
+==== Request/Subscription
+
+By requesting a subscription, a client can receive multiple asynchronous events.  This can start with a bootstrap of existing information, followed by live updates.
+
+Once a subscription ahs been made, it should be altered, or cancelled
+
+image::Request-Subscription.jpg[]
+
+.Pass a function to apply on a server for a given key
+[source,java]
+----
+
+interface Queryable<E> {
+
+    <R> Subscription<E, R> subscribe(Filter<E> filter, Function<E, R> returnMapping, Subscriber<R> subscriber);
+    
+}
+
+interface Subscription<R> {
+    // change the current filter.
+    void setFilter(Filter<E> newFilter);
+    
+    void cancel();
+}
+----
+
+Up to this point, all the message are actions lived with a single response.  In Chronicle-Engine, we associate a `csp` or Chronicle Service Path for each actor, and a `tid` or Transaction ID with each operation.  This allows multiple concurrent actions to different actors.  This routing information is passed in meta data, with the actions for that destination following
+
+.Pass a function to apply on a server for a given key
+[source,yaml]
+----
+# client sends server
+--- !!meta-data # binary
+csp: /maps/my-map
+tid: 12345
+--- !!data # binary
+subscribe: [
+   !MyFilter { field: age, op: gt, value: 18 },
+   !Getter { field: name }
+]
+request: 2 # only send me two events for now.
+
+# server sends client
+--- !!meta-data # binary
+tid: 12345
+--- !data-not-complete # binary
+reply: Steve Jobs
+--- !data-not-complete # binary
+reply: Alan Turing
+
+# client sends server
+--- !!meta-data # binary
+tid: 12345
+--- !data # binary
+cancel: []
+
+# server sends client
+--- !!meta-data # binary
+tid: 12345
+--- !data # binary
+cancelled: "By request"
+...
+----
+
+
+[[Client-Injected-Handler]]
+==== Client Injected Handler
+
+This approach allows the client to version and configure which handlers are used on the server on the client's behalf. In particular, this is useful when supporting multiple versions of clients concurrently.
+
+image::Client-Injected-Handler.jpg[]
+
+.Client passes a handler to intergate with the server and act it's behalf
+[source,java]
+----
+interface AcceptsHandler {
+
+    /**
+     * The accept method takes a handler to pass to the server.
+     * and it returns a proxy it can call to invoke that hdnler on the server.
+     */
+    <H extends ContextAcceptor> H accept(H handler);
+}
+----
+
+A simple example of a handler we use is for heartbeats
+
+[source,yaml]
+----
+# client sends server
+--- !!meta-data # binary
+csp: /
+cid: 1
+handler: !HeartbeatHandler {
+    heartbeatTimeoutMs: 10000
+    heartbeatIntervalMs: 2000
+}
+...
+----
+
+NOTE: This allows different clients to be working with dfferent versions of heartbeat handlers at the same time, supporting old and new clients with a single server.
+
+==== Conclusion
+
+In addition to https://vanilla-java.github.io/2016/05/16/Simple-Asynchronous-Microservices-using-Lambda-Architecture.html[Lambda Architecture] models for back end, peir-to-peir services, we can support a rich set of interactions between clients and servers.
+
+These interactions can be performed without a transport i.e. one component directly calls another to make testing and debugging easier.
+
+
+

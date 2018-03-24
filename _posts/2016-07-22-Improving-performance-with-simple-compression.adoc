@@ -1,0 +1,115 @@
+= Improving performance with simple compression
+Peter Lawrey
+:hp-tags: Chronicle Wire
+
+Chronicle Wire supports multiple Wire Formats such as YAML, JSON and CSV. It also supports a binary format of YAML for performance.  Chronicle Wire Enteprise has an additional Wire Format which performs simple compression which can be faster AND smaller than not compressing data.
+
+== Compression of serialized objects using delta-ring.
+
+Delta Wire automatically detects which fields in an object have changed and sends only those fields.  If the field is a number it can send the difference using less bytes.  It does this for nested objects individually as well.  
+
+You can still utilised generic compression like GZIP, LZW or Snappy to achieve further compression. However, these compression techniques are releatively more expensive and they can be ten times slower than no compression.  What if you want a compression technique which is actually faster?
+
+.A sample data structure in Java
+[source, java]
+----
+class MyDataType extends AbstractMarshallable implements KeyedMarshallable {
+    long firstId; // <1>
+    int secondId; // <1>
+    String thirdId; // <1>
+
+    String staticOne; // <2>
+    long staticTwo; // <2>
+    ZonedDateTime staticThree; // <2>
+    double staticFour; // <2>
+
+    long changesA; // <3>
+    double changesB; // <3>
+
+    @Override
+    public void writeKey(@NotNull Bytes bytes) {
+        bytes.writeLong(firstId).writeInt(secondId).writeUtf8(thirdId); // <4>
+    }
+}
+----
+<1> Composite key for this data transfer object
+<2> Fields which rarely change
+<3> Fields which often change
+<4> Write a key to signify when two objects represent the same data.
+
+To write this object you can use the Chronicle Wire library to write in different formats.
+
+.Update message as YAML - 268 bytes
+[source, yaml]
+----
+update: !MyDataType {
+  firstId: 1010101010101,
+  secondId: 2222,
+  thirdId: thirdId-1234,
+  staticOne: staticOne-1234,
+  staticTwo: 2020202020202,
+  staticThree: "2016-07-22T12:34:56.789Z[UTC]", # <1>
+  staticFour: 1000000.0,
+  changesA: 3000000000,
+  changesB: 123456.0
+}
+----
+<1> the date/time is in quotes as it contains [ and ]
+
+.Update message as JSON - 242 bytes, smaller without formatting
+[source, json]
+----
+"update":{"firstId":1010101010101,"secondId":2222,"thirdId":"thirdId-1234","staticOne":"staticOne-1234","staticTwo":2020202020202,"staticThree":"2016-07-22T12:34:56.789Z[UTC]","staticFour":1000000.0,"changesA":3000000001,"changesB":123457.0}
+----
+
+.Update message as Binary YAML - 205 bytes
+[source]
+----
+Æupdate¶⒑MyDataType\u0082µ٠٠٠ÇfirstId§µ>¶.ë٠٠٠ÈsecondId¥®⒏ÇthirdIdìthirdId-1234ÉstaticOneîstaticOne-1234ÉstaticTwo§j}l]Ö⒈٠٠ËstaticThreeµ\u001D2016-07-22T12:34:56.789Z[UTC]ÊstaticFour\u0090٠$tIÈchangesA£⒉^Ð²ÈchangesB\u0090٠!ñG
+----
+
+While Binary YAML is slightly smaller (< 20%) it's main purpose is speed of encoding and decoding. This is most evident when you have lots of primitive types, and less of a benefit when you have string/datetime fields which are encoded as strings anyway.  
+
+By comparison DeltaWire is designed to compact the message by reducing duplication with a loss-less compression. This reduces the time writing to memory, which can speed up the serialization operation.
+
+.Two updates, one change for the `changesA` and one change for `changesB` - 10 bytes average
+[source]
+----
+00000000 BA 00 89 00 80 04 BA 08  A8 C5 BA 00 89 00 80 04 ········ ········
+00000010 BA 09 9A 05                                      ····             
+----
+
+|====
+| Wire Format | Size per message
+| YAML | 268 bytes
+| JSON | 242 bytes
+| Binary YAML | 205 bytes
+| Delta Binary YAML | 10 bytes
+|====
+
+One of the challenges of using binary formats is human readability (as binary formats emphasis machine readability)  For this reason, we have ensured you can automatically convert both Binary YAML and Delta Binary YAML to YAML without knowledge of the application or schema.  The messages are still self describing allowing you to use this data even if the application's data structure changes over time.
+
+=== Doesn't compression makes it slower?
+
+It doesn't have to be slower if the compression is simple enough.  In fact writing/reading less data can improve performance.  Writing/reading less data to memory, let alone to disk or a network, can improve latency and throughput by touching less memory and writing less data.
+
+The test above is repeated 2,500 times resulting in 5,000 updates. The average time to serialize each message/udpate is recorded below.
+
+.Average time to serialize each update.
+[source]
+----
+TextWire Took an average of 3,446 ns
+JSONWire Took an average of 2,972 ns
+BinaryWire Took an average of 1,473 ns
+DeltaWire Took an average of 554 ns
+----
+
+What I find interesting is that the compressed wire format is also approximately 3-5x faster to serialize, as well as being approximately 20x smaller.
+
+== Conclusion
+
+Using simple compression such as delta-ring can not only be much smaller such as 1/20 th the size, it can also be faster to serialize the data due to less memory being touched. In this example it as at least 3 times faster.
+
+NOTE: After delta-ring you can still use generic compression to obtain a further reduction of the size of data.
+
+
